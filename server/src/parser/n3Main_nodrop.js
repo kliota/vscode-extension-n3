@@ -16445,6 +16445,10 @@ class n3_nodropTermListener extends n3_nodropListener {
 
         this.listener.onTerm('qvar', name);
     }
+
+    exitTriples(ctx) {
+        this.listener.onTriple(ctx);
+	}
 }
 
 class n3_nodropPrintVisitor extends n3_nodropVisitor {

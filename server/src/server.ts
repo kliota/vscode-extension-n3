@@ -155,7 +155,7 @@ interface AcOptions {
 }
 
 function setupServer(config: ServerConfig) {
-	connection.console.log("config: " + JSON.stringify(config, null, 4));
+	// connection.console.log("config: " + JSON.stringify(config, null, 4));
 
 	const ns = config.ns;
 	const ac = config.ac;
@@ -339,11 +339,39 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		// TODO associate pnames with namespace uris, not prefixes
 		// (already works this way with well-known vocabulary terms)
 
-		onTerm: function (type: string, term: any) {
-			// connection.console.log(type + ": " + JSON.stringify(term));
+		onTerm: function (type: string, term: any, ctx: any) {
+			// connection.console.log("onTerm:" + type + ": " + JSON.stringify(term));
 
 			// (ac) collect auto-complete tokens
 			acTokens.add(docUri, type, term);
+		},
+
+		onTriple: function (ctx: any) {
+			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
+			// ctx structure follows N3 grammar - this ctx corresponds to 'triples' production
+			// (https://w3c.github.io/N3/spec/#grammar-production-triples)
+			const subject:any  = ctx.children[0];
+			const predicateObjectList:any  = ctx.children[1];
+			const verb = predicateObjectList.children[0];
+			const objectList = predicateObjectList.children[1];
+			const object = objectList.children[0];
+
+			function ctx_text(ctx:any) {
+				return text.substring(ctx.start.start, ctx.stop.stop+1);
+			}
+			
+			// (gets the rule number for the most specific term production)
+			function term_prod(ctx:any): any {
+				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
+					return term_prod(ctx.children[0]);
+				} else {
+					return ctx.ruleIndex+1;
+				}
+			}
+			
+			connection.console.log(`subject: ${ctx_text(subject)} ${term_prod(subject)}`);
+			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
+			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
 		},
 
 		onPrefix: function (prefix: string, uri: string) {
