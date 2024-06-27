@@ -350,6 +350,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
 			// ctx structure follows N3 grammar - this ctx corresponds to 'triples' production
 			// (https://w3c.github.io/N3/spec/#grammar-production-triples)
+
+			// TODO: make sure that triple has subject, predicate & object!!
 			const subject:any  = ctx.children[0];
 			const predicateObjectList:any  = ctx.children[1];
 			const verb = predicateObjectList.children[0];
@@ -369,7 +371,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				}
 			}
 			
-			connection.console.log(`subject: ${ctx_text(subject)} ${term_prod(subject)}`);
+			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
 			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
 			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
 		},
