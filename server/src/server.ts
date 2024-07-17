@@ -346,35 +346,144 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			acTokens.add(docUri, type, term);
 		},
 
+		/*onTriple: function (ctx: any) {
+			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
+			// ctx structure follows N3 grammar - this ctx corresponds to 'triples' production
+			// (https://w3c.github.io/N3/spec/#grammar-production-triples)
+		
+			// Helper function to extract text from a context
+			function ctx_text(ctx: any) {
+				return text.substring(ctx.start.start, ctx.stop.stop + 1);
+			}
+		
+			// Helper function to get the rule number for the most specific term production
+			function term_prod(ctx: any): any {
+				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
+					return term_prod(ctx.children[0]);
+				} else {
+					return ctx.ruleIndex + 1;
+				}
+			}
+		
+			// Ensure that the triple has at least subject and predicateObjectList
+			if (!ctx.children || ctx.children.length < 2) {
+				connection.console.log("Error: Incomplete triple, missing subject or predicateObjectList.");
+				return;
+			}
+		
+			const subject: any = ctx.children[0];
+			const predicateObjectList: any = ctx.children[1];
+		
+			// Ensure predicateObjectList has at least verb and objectList
+			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
+				connection.console.log("Error: Incomplete predicateObjectList, missing verb or objectList.");
+				return;
+			}
+		
+			const verb = predicateObjectList.children[0];
+			const objectList = predicateObjectList.children[1];
+		
+			// Ensure objectList has at least one object
+			if (!objectList.children || objectList.children.length < 1) {
+				connection.console.log("Error: Incomplete objectList, missing object.");
+				return;
+			}
+		
+			const object = objectList.children[0];
+		
+			// Log the subject, verb, and object
+			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
+			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
+			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
+		}, */
+
 		onTriple: function (ctx: any) {
 			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
 			// ctx structure follows N3 grammar - this ctx corresponds to 'triples' production
 			// (https://w3c.github.io/N3/spec/#grammar-production-triples)
-
-			// TODO: make sure that triple has subject, predicate & object!!
-			const subject:any  = ctx.children[0];
-			const predicateObjectList:any  = ctx.children[1];
-			const verb = predicateObjectList.children[0];
-			const objectList = predicateObjectList.children[1];
-			const object = objectList.children[0];
-
-			function ctx_text(ctx:any) {
-				return text.substring(ctx.start.start, ctx.stop.stop+1);
+		
+			// Helper function to extract text from a context
+			function ctx_text(ctx: any) {
+				return text.substring(ctx.start.start, ctx.stop.stop + 1);
 			}
-			
-			// (gets the rule number for the most specific term production)
-			function term_prod(ctx:any): any {
+		
+			// Helper function to get the rule number for the most specific term production
+			function term_prod(ctx: any): any {
 				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
 					return term_prod(ctx.children[0]);
 				} else {
-					return ctx.ruleIndex+1;
+					return ctx.ruleIndex + 1;
 				}
 			}
-			
+		
+			// Ensure that the triple has at least subject and predicateObjectList
+			if (!ctx.children || ctx.children.length < 2) {
+				connection.console.log("Warning: Incomplete triple, missing subject or predicateObjectList.");
+				connection.sendDiagnostics({
+					uri: ctx.uri,
+					diagnostics: [{
+						severity: 2, // 2 indicates warning
+						range: {
+							start: { line: ctx.start.line, character: ctx.start.column },
+							end: { line: ctx.stop.line, character: ctx.stop.column }
+						},
+						message: "Incomplete triple, missing subject or predicateObjectList.",
+						source: "N3"
+					}]
+				});
+				return;
+			}
+		
+			const subject: any = ctx.children[0];
+			const predicateObjectList: any = ctx.children[1];
+		
+			// Ensure predicateObjectList has at least verb and objectList
+			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
+				connection.console.log("Warning: Incomplete predicateObjectList, missing verb or objectList.");
+				connection.sendDiagnostics({
+					uri: ctx.uri,
+					diagnostics: [{
+						severity: 2, // 2 indicates warning
+						range: {
+							start: { line: ctx.start.line, character: ctx.start.column },
+							end: { line: ctx.stop.line, character: ctx.stop.column }
+						},
+						message: "Incomplete predicateObjectList, missing verb or objectList.",
+						source: "N3"
+					}]
+				});
+				return;
+			}
+		
+			const verb = predicateObjectList.children[0];
+			const objectList = predicateObjectList.children[1];
+		
+			// Ensure objectList has at least one object
+			if (!objectList.children || objectList.children.length < 1) {
+				connection.console.log("Warning: Incomplete objectList, missing object.");
+				connection.sendDiagnostics({
+					uri: ctx.uri,
+					diagnostics: [{
+						severity: 2, // 2 indicates warning
+						range: {
+							start: { line: ctx.start.line, character: ctx.start.column },
+							end: { line: ctx.stop.line, character: ctx.stop.column }
+						},
+						message: "Incomplete objectList, missing object.",
+						source: "N3"
+					}]
+				});
+				return;
+			}
+		
+			const object = objectList.children[0];
+		
+			// Log the subject, verb, and object
 			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
 			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
 			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
-		},
+		}, 
+		
 
 		onPrefix: function (prefix: string, uri: string) {
 			prefix = String(prefix);
