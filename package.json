@@ -21,7 +21,8 @@
 	"activationEvents": [
 		"onLanguage:n3",
 		"onCommand:n3.execute",
-		"onCommand:n3.debug"
+		"onCommand:n3.debug",
+		"onCommand:n3Checker.checkFunction"
 	],
 	"main": "./client/out/extension.js",
 	"contributes": {
@@ -70,6 +71,11 @@
 			{
 				"command": "n3.debug",
 				"title": "Debug N3 Code",
+				"category": "N3"
+			},
+			{
+				"command": "n3Checker.checkFunction",
+				"title": "Check Function in Prefix",
 				"category": "N3"
 			},
 			{
@@ -190,11 +196,14 @@
 		"eslint": "^8.26.0",
 		"mocha": "^9.2.1",
 		"typescript": "^4.9.4",
-		"vscode-test": "^1.3.0"
+		"vscode-test": "^1.3.0",
+		"webpack": "^5.92.1",
+		"webpack-cli": "^5.1.4"
 	},
 	"dependencies": {
 		"python-shell": "^3.0.1",
 		"should": "^13.2.3",
-		"tsce": "^0.0.2-728e3d8f6f961ed1dd9b59ba3285788cb13ff913"
+		"tsce": "^0.0.2-728e3d8f6f961ed1dd9b59ba3285788cb13ff913",
+		"vscode": "^1.1.37"
 	}
 }

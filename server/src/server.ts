@@ -482,8 +482,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
 			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
 			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
+<<<<<<< Updated upstream
 		}, 
 		
+=======
+		},	
+>>>>>>> Stashed changes
 
 		onPrefix: function (prefix: string, uri: string) {
 			prefix = String(prefix);

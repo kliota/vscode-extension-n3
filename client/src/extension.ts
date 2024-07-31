@@ -5,10 +5,10 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from "path";
+import * as vscode from "vscode";
 import {
 	commands,
 	ExtensionContext,
-	languages,
 	Position,
 	Range,
 	Selection,
@@ -19,122 +19,194 @@ import {
 	workspace,
 } from "vscode";
 
-import * as vscode from "vscode";
 import {
 	LanguageClient,
 	LanguageClientOptions,
 	ServerOptions,
-	TextDocument,
 	TransportKind,
 } from "vscode-languageclient/node";
 
 import { runN3Execute, runN3Debug } from "./n3/n3Execute";
 import { n3OutputChannel } from "./n3/n3OutputChannel";
+import axios from 'axios';
 
 let client: LanguageClient;
 
-export function activate(context: ExtensionContext) {
-	n3OutputChannel.show();
+const BUILTINS_URL = 'https://eulersharp.sourceforge.net/2003/03swap/eye-builtins.html';
+const outputChannel = vscode.window.createOutputChannel('Built-in Functions');
 
-	// - LSP client
+async function fetchBuiltIns(): Promise<Map<string, Set<string>>> {
+    try {
+        const response = await axios.get(BUILTINS_URL);
+        const data = response.data as string;
 
-	// The server is implemented in node
-	const serverModule = context.asAbsolutePath(
-		path.join("server", "out", "server.js")
-	);
-	// The debug options for the server
-	// --inspect=6009: runs the server in Node's Inspector mode so VS Code can attach to the server for debugging
-	const debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
+        console.log("Data fetched successfully");
+        console.log("Raw Data Response:", data); // To see the raw HTML
 
-	// If the extension is launched in debug mode then the debug server options are used
-	// Otherwise the run options are used
-	const serverOptions: ServerOptions = {
-		run: { module: serverModule, transport: TransportKind.ipc },
-		debug: {
-			module: serverModule,
-			transport: TransportKind.ipc,
-			options: debugOptions,
-		},
-	};
+        const builtIns = new Map<string, Set<string>>();
 
-	const serverConfig: object = getServerConfig(context);
+        //const regex = /([a-z]+):([a-zA-Z-]+) a e:Builtin\./g;
+        //console.log("Regex pattern:", regex.toString());
 
-	// Options to control the language client
-	const clientOptions: LanguageClientOptions = {
-		// Register the server for plain text documents
-		documentSelector: [{ scheme: "file", language: "n3" }],
-		synchronize: {
-			// configurationSection: 'n3LspServer', // need to pre-process our config first (getServerConfig)
-			// Notify the server about file changes to '.clientrc files contained in the workspace
-			fileEvents: workspace.createFileSystemWatcher("**/.clientrc"),
-		},
-		initializationOptions: serverConfig,
-	};
+		// Extract the prefixes and their URLs
+        const prefixRegex = /<span class="keyword">@prefix<\/span> (\w+): <a class="uri" href="[^"]+">[^<]+<\/a>\./g;
+        const functionRegex = /<a class="qname" href="[^"]+">(\w+):(\w+)<\/a> <span class="keyword">a<\/span> <a class="qname" href="[^"]+">e:Builtin<\/a>\./g;
+        
 
-	// Create the language client and start the client.
-	client = new LanguageClient(
-		"N3languageServer",
-		"N3 Language Server",
-		serverOptions,
-		clientOptions
-	);
 
-	// Start the client. This will also launch the server
-	client.start();
+        let match;
+        let matchCount = 0;
+        while ((match = functionRegex.exec(data)) !== null) { 
+            const prefix = match[1]; 
+            const func = match[2]; 
+            console.log(`Match ${++matchCount} - Prefix: ${prefix}, Function: ${func}`); 
+             
+            if (!builtIns.has(prefix)) { 
+                builtIns.set(prefix, new Set()); 
+            } 
+            builtIns.get(prefix)!.add(func); 
+        } 
+ 
+        // After processing all matches 
+        console.log(`Total matches found: ${matchCount}`); 
+        logBuiltIns(builtIns); 
+ 
+        return builtIns; 
+    } catch (error) { 
+        vscode.window.showErrorMessage(`Error fetching built-ins: ${error.message}`); 
+        console.error(`Error fetching built-ins: ${error.message}`); 
+        return new Map(); 
+    } 
+}
 
-	// - N3Execute
+function logBuiltIns(builtIns: Map<string, Set<string>>) {
+    console.log("Logging parsed built-ins:");
+    builtIns.forEach((funcs, prefix) => {
+        console.log(`Prefix: ${prefix}`);
+        funcs.forEach(func => {
+            console.log(`  Function: ${func}`);
+        });
+    });
+}
 
-	context.subscriptions.push(
-		commands.registerCommand("n3.execute", async () => {
-			await runN3Execute(context);
-		})
-	);
+async function checkFunctionInPrefix(prefix: string, func: string): Promise<boolean> {
+    const builtIns = await fetchBuiltIns();
+    console.log(`Checking function "${func}" in prefix "${prefix}": `, builtIns.get(prefix));  // Debug message
+    if (builtIns.has(prefix)) {
+        const exists = builtIns.get(prefix)!.has(func);
+        if (exists) {
+            return true;
+        } else {
+            vscode.window.showInformationMessage(`The function "${func}" does not exist in the prefix "${prefix}".`);
+        }
+    } else {
+        vscode.window.showInformationMessage(`No functions found for prefix "${prefix}".`);
+    }
+    return false;
+}
 
-	// - N3Debug
-
-	context.subscriptions.push(
-		commands.registerCommand("n3.debug", async () => {
-			await runN3Debug(context);
-		})
-	);
-
-	// insert test traces
-	const traceInsert = new TraceInsert();
-	context.subscriptions.push(
-		commands.registerTextEditorCommand(
-			"n3.addTrace",
-			async (editor: TextEditor, edit: TextEditorEdit) =>
-				editor.selections.forEach((selection, i) =>
-					traceInsert.insert(editor, edit, selection)
-				)
-		)
-	);
+export async function activate(context: ExtensionContext) {
+    n3OutputChannel.show();
 	
-	workspace.onDidChangeConfiguration((event) => {
-		if (event.affectsConfiguration("n3LspServer")) {
-			const serverConfig = getServerConfig(context);
+	// Fetch built-ins and log them
+    const builtIns = await fetchBuiltIns();
+    logBuiltIns(builtIns);
 
-			// n3OutputChannel.append(`onDidChangeConfiguration: ${JSON.stringify(serverConfig, null, 4)}`);
-			client.sendNotification("update/config", serverConfig);
-		}
-	});
+    // - LSP client
+    const serverModule = context.asAbsolutePath(
+        path.join("server", "out", "server.js")
+    );
+    const debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
 
-	// execute updates requested from server
-	// (in our case, requests to insert namespaces)
-	client.onReady().then(() => {
-		client.onNotification("update/namespaces", (edits: InsertNamespace[]) => {
-			//   n3OutputChannel.append("received: " + JSON.stringify(edits, null, 4));
+    const serverOptions: ServerOptions = {
+        run: { module: serverModule, transport: TransportKind.ipc },
+        debug: {
+            module: serverModule,
+            transport: TransportKind.ipc,
+            options: debugOptions,
+        },
+    };
 
-			const editor = vscode.window.activeTextEditor;
-			edits.forEach((edit) => {
-				const txtEdit = edit.edit;
-				editor.edit((editBuilder) => {
-					editBuilder.insert(txtEdit.range.start, txtEdit.newText);
-				});
-				window.showInformationMessage(`Inserted namespace: "${edit.ns.prefix}" (you can turn this off under settings)`);
-			});
-		});
-	});
+    const serverConfig: object = getServerConfig(context);
+
+    const clientOptions: LanguageClientOptions = {
+        documentSelector: [{ scheme: "file", language: "n3" }],
+        synchronize: {
+            fileEvents: workspace.createFileSystemWatcher("**/.clientrc"),
+        },
+        initializationOptions: serverConfig,
+    };
+
+    client = new LanguageClient(
+        "N3languageServer",
+        "N3 Language Server",
+        serverOptions,
+        clientOptions
+    );
+
+    client.start();
+
+    context.subscriptions.push(
+        commands.registerCommand("n3.execute", async () => {
+            await runN3Execute(context);
+        })
+    );
+
+    context.subscriptions.push(
+        commands.registerCommand("n3.debug", async () => {
+            await runN3Debug(context);
+        })
+    );
+
+    const traceInsert = new TraceInsert();
+    context.subscriptions.push(
+        commands.registerTextEditorCommand(
+            "n3.addTrace",
+            async (editor: TextEditor, edit: TextEditorEdit) =>
+                editor.selections.forEach((selection, i) =>
+                    traceInsert.insert(editor, edit, selection)
+                )
+        )
+    );
+
+    workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("n3LspServer")) {
+            const serverConfig = getServerConfig(context);
+            client.sendNotification("update/config", serverConfig);
+        }
+    });
+
+    client.onReady().then(() => {
+        client.onNotification("update/namespaces", (edits: InsertNamespace[]) => {
+            const editor = vscode.window.activeTextEditor;
+            edits.forEach((edit) => {
+                const txtEdit = edit.edit;
+                editor.edit((editBuilder) => {
+                    editBuilder.insert(txtEdit.range.start, txtEdit.newText);
+                });
+                window.showInformationMessage(`Inserted namespace: "${edit.ns.prefix}" (you can turn this off under settings)`);
+            });
+        });
+    });
+
+    // Register the new command for checking functions
+    context.subscriptions.push(
+        vscode.commands.registerCommand('n3Checker.checkFunction', async () => {
+            const prefix = await vscode.window.showInputBox({ prompt: 'Enter the prefix' });
+            const func = await vscode.window.showInputBox({ prompt: 'Enter the function name' });
+
+            if (prefix && func) {
+                const exists = await checkFunctionInPrefix(prefix, func);
+                if (exists) {
+                    vscode.window.showInformationMessage(`The function "${func}" exists in the prefix "${prefix}".`);
+                } else {
+                    vscode.window.showInformationMessage(`The function "${func}" does not exist in the prefix "${prefix}".`);
+                }
+            } else {
+                vscode.window.showWarningMessage('Prefix and function name are required.');
+            }
+        })
+    );
 }
 
 function getServerConfig(context: ExtensionContext): object {
@@ -144,8 +216,6 @@ function getServerConfig(context: ExtensionContext): object {
 		ns: { map: undefined, mode: undefined },
 		ac: { enabled: undefined, vocabTermMap: undefined },
 	};
-
-	// namespaces file
 
 	const configNsPath = config.get<string>("namespacesFile");
 	const nsMapPath = configNsPath
@@ -160,8 +230,6 @@ function getServerConfig(context: ExtensionContext): object {
 			`error loading namespaces file ${configNsPath}: ${e}`
 		);
 	}
-
-	// auto-complete
 
 	const configAc = config.get<boolean>("autocomplete");
 	serverConfig.ac.enabled = configAc;
@@ -198,7 +266,6 @@ function getServerConfig(context: ExtensionContext): object {
 		}
 	}
 
-	// n3OutputChannel.append("config: " + JSON.stringify(serverConfig));
 	return serverConfig;
 }
 
@@ -225,21 +292,17 @@ class TraceInsert {
 		let nextNewline = false;
 		let indent = "";
 
-		// not at start of line, so may need newline for this trace
 		if (pos.character > 0) {
 			const wsRange = editor.document.getWordRangeAtPosition(
 				new Position(pos.line, 0),
 				/\s+/
 			);
 
-			// if all prior characters are whitespaces, don't need newline
 			if (!(wsRange !== undefined && wsRange.end.character >= pos.character)) {
 				priorNewline = true;
 
 				const line = editor.document.lineAt(pos.line).text;
-				// if needed, add an ending "." for prior line
 				if (!line.trim().endsWith(".")) {
-					// (let's not add illegal syntax)
 					if (!line.substring(0, pos.character).trim().endsWith("{"))
 						priorEndChar = (line.endsWith(" ") ? "" : " ") + ".";
 				}
@@ -249,22 +312,17 @@ class TraceInsert {
 		const nextChar = editor.document.getText(
 			new Range(new Position(pos.line, pos.character + 1), pos)
 		);
-		// if any next character, insert newline to put it on next line
 		if (nextChar != "") {
 			nextNewline = true;
 		}
 
-		// - if any newline, then figure out indentation from current line
-
 		if ((priorNewline || nextNewline) && pos.line > 0) {
-			// get range of whitespaces at current line
 			const range = editor.document.getWordRangeAtPosition(
 				new Position(pos.line, 0),
 				/\s+/
 			);
 
 			if (range !== undefined) {
-				// let's not add an indent if it does not line up with the current cursor
 				if (!nextNewline || range.end.character == pos.character) {
 					const numSpaces = range.end.character - range.start.character;
 					indent = new Array(numSpaces + 1).join(" ");
@@ -278,7 +336,6 @@ class TraceInsert {
 			(nextNewline ? "\n" + indent : "");
 
 		edit.insert(pos, text);
-		// n3OutputChannel.debug("select", selection.active);
 	}
 }
 
