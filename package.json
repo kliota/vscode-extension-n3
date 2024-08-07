@@ -201,6 +201,7 @@
 		"webpack-cli": "^5.1.4"
 	},
 	"dependencies": {
+		"axios": "^1.7.3",
 		"python-shell": "^3.0.1",
 		"should": "^13.2.3",
 		"tsce": "^0.0.2-728e3d8f6f961ed1dd9b59ba3285788cb13ff913",

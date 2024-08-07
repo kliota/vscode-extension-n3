@@ -22,12 +22,15 @@ import {
 	TextEdit,
 } from "vscode-languageserver/node";
 
+
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 const n3 = require("./parser/n3Main_nodrop.js");
 
 // (ac)
 import { DocTokens } from "./ac/DocTokens.js";
+import axios from 'axios';
+
 
 // import * as should from 'should';
 // import { spawnSync } from "child_process";
@@ -214,6 +217,76 @@ function getDocumentSettings(resource: string): Thenable<any> {
 	return result;
 }
 
+const BUILTINS_URL = 'https://eulersharp.sourceforge.net/2003/03swap/eye-builtins.html';
+
+async function fetchBuiltIns(): Promise<Map<string, Set<string>>> {
+    try {
+        const response = await axios.get(BUILTINS_URL);
+        const data = response.data as string;
+
+        //console.log("Data fetched successfully");
+        //console.log("Raw Data Response:", data); // To see the raw HTML
+
+        const builtIns = new Map<string, Set<string>>();
+
+        const functionRegex = /<a class="qname" href="[^"]+">(\w+):(\w+)<\/a> <span class="keyword">a<\/span> <a class="qname" href="[^"]+">e:Builtin<\/a>\./g;
+
+        let match;
+        let matchCount = 0;
+        while ((match = functionRegex.exec(data)) !== null) {
+            const prefix = match[1];
+            const func = match[2];
+            //console.log(`Match ${++matchCount} - Prefix: ${prefix}, Function: ${func}`);
+
+            if (!builtIns.has(prefix)) {
+                builtIns.set(prefix, new Set());
+            }
+            builtIns.get(prefix)!.add(func);
+        }
+
+        // After processing all matches
+        //console.log(`Total matches found: ${matchCount}`);
+        //logBuiltIns(builtIns);
+
+        return builtIns;
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error(`Error fetching built-ins: ${error.message}`);
+        } else {
+            console.error('Unknown error fetching built-ins');
+        }
+        return new Map();
+    }
+}
+
+function logBuiltIns(builtIns: Map<string, Set<string>>) {
+    console.log("Logging parsed built-ins:");
+    builtIns.forEach((funcs, prefix) => {
+        console.log(`Prefix: ${prefix}`);
+        funcs.forEach(func => {
+            console.log(`  Function: ${func}`);
+        });
+    });
+}
+
+async function checkFunctionInPrefix(prefix: string, func: string): Promise<boolean> {
+    const builtIns = await fetchBuiltIns();
+    //console.log(`Checking function "${func}" in prefix "${prefix}": `, builtIns.get(prefix));  // Debug message
+    if (builtIns.has(prefix)) {
+        const exists = builtIns.get(prefix)!.has(func);
+        if (exists) {
+            return true;
+        } else {
+            console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+        }
+    } else {
+        console.log(`No functions found for prefix "${prefix}".`);
+    }
+    return false;
+}
+
+
+
 // connection.onDidChangeWatchedFiles(_change => {
 // 	// Monitored files have change in VSCode
 // 	connection.console.log('We received an file change event');
@@ -346,56 +419,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			acTokens.add(docUri, type, term);
 		},
 
-		/*onTriple: function (ctx: any) {
-			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
-			// ctx structure follows N3 grammar - this ctx corresponds to 'triples' production
-			// (https://w3c.github.io/N3/spec/#grammar-production-triples)
-		
-			// Helper function to extract text from a context
-			function ctx_text(ctx: any) {
-				return text.substring(ctx.start.start, ctx.stop.stop + 1);
-			}
-		
-			// Helper function to get the rule number for the most specific term production
-			function term_prod(ctx: any): any {
-				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
-					return term_prod(ctx.children[0]);
-				} else {
-					return ctx.ruleIndex + 1;
-				}
-			}
-		
-			// Ensure that the triple has at least subject and predicateObjectList
-			if (!ctx.children || ctx.children.length < 2) {
-				connection.console.log("Error: Incomplete triple, missing subject or predicateObjectList.");
-				return;
-			}
-		
-			const subject: any = ctx.children[0];
-			const predicateObjectList: any = ctx.children[1];
-		
-			// Ensure predicateObjectList has at least verb and objectList
-			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
-				connection.console.log("Error: Incomplete predicateObjectList, missing verb or objectList.");
-				return;
-			}
-		
-			const verb = predicateObjectList.children[0];
-			const objectList = predicateObjectList.children[1];
-		
-			// Ensure objectList has at least one object
-			if (!objectList.children || objectList.children.length < 1) {
-				connection.console.log("Error: Incomplete objectList, missing object.");
-				return;
-			}
-		
-			const object = objectList.children[0];
-		
-			// Log the subject, verb, and object
-			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
-			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
-			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
-		}, */
 
 		onTriple: function (ctx: any) {
 			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
@@ -482,7 +505,20 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
 			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
 			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
-		}, 
+		
+			// Extract prefix and function from verb
+			const verbText = ctx_text(verb);
+			const [prefix, func] = verbText.split(':');
+		
+			// Check if the function exists within the prefix
+			checkFunctionInPrefix(prefix, func).then(functionExists => {
+				if (functionExists) {
+					connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
+				} else {
+					connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+				}
+			});
+		},
 		
 
 		onPrefix: function (prefix: string, uri: string) {

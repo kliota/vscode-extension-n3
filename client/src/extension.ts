@@ -32,85 +32,11 @@ import axios from 'axios';
 
 let client: LanguageClient;
 
-const BUILTINS_URL = 'https://eulersharp.sourceforge.net/2003/03swap/eye-builtins.html';
-const outputChannel = vscode.window.createOutputChannel('Built-in Functions');
-
-async function fetchBuiltIns(): Promise<Map<string, Set<string>>> {
-    try {
-        const response = await axios.get(BUILTINS_URL);
-        const data = response.data as string;
-
-        console.log("Data fetched successfully");
-        console.log("Raw Data Response:", data); // To see the raw HTML
-
-        const builtIns = new Map<string, Set<string>>();
-
-        //const regex = /([a-z]+):([a-zA-Z-]+) a e:Builtin\./g;
-        //console.log("Regex pattern:", regex.toString());
-
-		// Extract the prefixes and their URLs
-        const prefixRegex = /<span class="keyword">@prefix<\/span> (\w+): <a class="uri" href="[^"]+">[^<]+<\/a>\./g;
-        const functionRegex = /<a class="qname" href="[^"]+">(\w+):(\w+)<\/a> <span class="keyword">a<\/span> <a class="qname" href="[^"]+">e:Builtin<\/a>\./g;
-        
-
-
-        let match;
-        let matchCount = 0;
-        while ((match = functionRegex.exec(data)) !== null) { 
-            const prefix = match[1]; 
-            const func = match[2]; 
-            console.log(`Match ${++matchCount} - Prefix: ${prefix}, Function: ${func}`); 
-             
-            if (!builtIns.has(prefix)) { 
-                builtIns.set(prefix, new Set()); 
-            } 
-            builtIns.get(prefix)!.add(func); 
-        } 
- 
-        // After processing all matches 
-        console.log(`Total matches found: ${matchCount}`); 
-        logBuiltIns(builtIns); 
- 
-        return builtIns; 
-    } catch (error) { 
-        vscode.window.showErrorMessage(`Error fetching built-ins: ${error.message}`); 
-        console.error(`Error fetching built-ins: ${error.message}`); 
-        return new Map(); 
-    } 
-}
-
-function logBuiltIns(builtIns: Map<string, Set<string>>) {
-    console.log("Logging parsed built-ins:");
-    builtIns.forEach((funcs, prefix) => {
-        console.log(`Prefix: ${prefix}`);
-        funcs.forEach(func => {
-            console.log(`  Function: ${func}`);
-        });
-    });
-}
-
-async function checkFunctionInPrefix(prefix: string, func: string): Promise<boolean> {
-    const builtIns = await fetchBuiltIns();
-    console.log(`Checking function "${func}" in prefix "${prefix}": `, builtIns.get(prefix));  // Debug message
-    if (builtIns.has(prefix)) {
-        const exists = builtIns.get(prefix)!.has(func);
-        if (exists) {
-            return true;
-        } else {
-            vscode.window.showInformationMessage(`The function "${func}" does not exist in the prefix "${prefix}".`);
-        }
-    } else {
-        vscode.window.showInformationMessage(`No functions found for prefix "${prefix}".`);
-    }
-    return false;
-}
 
 export async function activate(context: ExtensionContext) {
     n3OutputChannel.show();
 	
-	// Fetch built-ins and log them
-    const builtIns = await fetchBuiltIns();
-    logBuiltIns(builtIns);
+	
 
     // - LSP client
     const serverModule = context.asAbsolutePath(
@@ -189,24 +115,7 @@ export async function activate(context: ExtensionContext) {
         });
     });
 
-    // Register the new command for checking functions
-    context.subscriptions.push(
-        vscode.commands.registerCommand('n3Checker.checkFunction', async () => {
-            const prefix = await vscode.window.showInputBox({ prompt: 'Enter the prefix' });
-            const func = await vscode.window.showInputBox({ prompt: 'Enter the function name' });
-
-            if (prefix && func) {
-                const exists = await checkFunctionInPrefix(prefix, func);
-                if (exists) {
-                    vscode.window.showInformationMessage(`The function "${func}" exists in the prefix "${prefix}".`);
-                } else {
-                    vscode.window.showInformationMessage(`The function "${func}" does not exist in the prefix "${prefix}".`);
-                }
-            } else {
-                vscode.window.showWarningMessage('Prefix and function name are required.');
-            }
-        })
-    );
+    
 }
 
 function getServerConfig(context: ExtensionContext): object {
