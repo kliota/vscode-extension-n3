@@ -286,14 +286,10 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
 }
 
 
-
 async function fetchAndExtractParameters(url: string): Promise<void> {
     try {
         const response = await axios.get(url);
         const htmlContent = response.data;
-
-        // Log the HTML content to understand what we're working with
-       // console.log('HTML Content:', htmlContent);
 
         // Extract JSON data from the script tag
         const jsonRegex = /<script type="application\/json" data-target="react-app\.embeddedData">({.*?})<\/script>/;
@@ -301,42 +297,59 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
 
         if (jsonMatch) {
             const jsonData = JSON.parse(jsonMatch[1]);
-            //console.log('Extracted JSON Data:', jsonData);
-
             // Extract the RDF data from the JSON payload
             const rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
             if (rdfData) {
-                //console.log('RDF Data:', rdfData);
-
-                // Adjusted regex to capture full fno:Parameter blocks including nested structures
+                // Regex to capture full fno:Parameter blocks
                 const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\s*\]/g;
-                let match;
-                while ((match = parameterRegex.exec(rdfData)) !== null) {
-                    const parameterBlock = match[0];
-                    console.log('Extracted Parameter Block:', parameterBlock);
+                let parameterMatch;
+                
+                // Arrays to hold xsd values
+                const xsdValues: Set<string> = new Set(); // Using Set to avoid duplicates
 
-                    // Further extraction for specific properties if needed
-                    const typeRegex = /fno:type\s+([\s\S]*?);/g;
+                while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
+                    const parameterBlock = parameterMatch[0];
+
+                    // Regex to capture fno:type and extract xsd values
+                    const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
                     let typeMatch;
                     while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
-                        console.log('Extracted fno:type:', typeMatch[1].trim());
+                        const typeContent = typeMatch[1].trim();
+                        // Extract xsd values from fno:type content
+                        const typeXsdRegex = /xsd:[\w-]+/g;
+                        let typeXsdMatch;
+                        while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
+                            xsdValues.add(typeXsdMatch[0]);
+                        }
+                    }
+
+                    // Extract owl:unionOf content
+                    const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
+                    const unionOfMatch = unionOfRegex.exec(parameterBlock);
+                    if (unionOfMatch) {
+                        // Extract xsd values from owl:unionOf content
+                        const unionOfXsdRegex = /xsd:[\w-]+/g;
+                        let unionOfXsdMatch;
+                        while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfMatch[1])) !== null) {
+                            xsdValues.add(unionOfXsdMatch[0]);
+                        }
                     }
                 }
 
-                if (!rdfData) {
-                    console.log('No RDF content found in the HTML.');
-                }
+                // Convert Set to Array for better logging
+                const xsdValuesArray = Array.from(xsdValues);
+                console.log('Extracted xsd values:', xsdValuesArray);
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
         } else {
             console.log('No JSON block found in the HTML.');
         }
-
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
 }
+
 
 // Function to determine if the error is an Axios error
 function isAxiosError(error: unknown): error is AxiosError {
