@@ -29,7 +29,7 @@ const n3 = require("./parser/n3Main_nodrop.js");
 
 // (ac)
 import { DocTokens } from "./ac/DocTokens.js";
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 
 
 // import * as should from 'should';
@@ -287,6 +287,90 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
 
 
 
+async function fetchAndExtractParameters(url: string): Promise<void> {
+    try {
+        const response = await axios.get(url);
+        const htmlContent = response.data;
+
+        // Log the HTML content to understand what we're working with
+       // console.log('HTML Content:', htmlContent);
+
+        // Extract JSON data from the script tag
+        const jsonRegex = /<script type="application\/json" data-target="react-app\.embeddedData">({.*?})<\/script>/;
+        const jsonMatch = htmlContent.match(jsonRegex);
+
+        if (jsonMatch) {
+            const jsonData = JSON.parse(jsonMatch[1]);
+            //console.log('Extracted JSON Data:', jsonData);
+
+            // Extract the RDF data from the JSON payload
+            const rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
+            if (rdfData) {
+                //console.log('RDF Data:', rdfData);
+
+                // Adjusted regex to capture full fno:Parameter blocks including nested structures
+                const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\s*\]/g;
+                let match;
+                while ((match = parameterRegex.exec(rdfData)) !== null) {
+                    const parameterBlock = match[0];
+                    console.log('Extracted Parameter Block:', parameterBlock);
+
+                    // Further extraction for specific properties if needed
+                    const typeRegex = /fno:type\s+([\s\S]*?);/g;
+                    let typeMatch;
+                    while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
+                        console.log('Extracted fno:type:', typeMatch[1].trim());
+                    }
+                }
+
+                if (!rdfData) {
+                    console.log('No RDF content found in the HTML.');
+                }
+            } else {
+                console.log('No RDF data found in the JSON payload.');
+            }
+        } else {
+            console.log('No JSON block found in the HTML.');
+        }
+
+    } catch (error) {
+        console.error('Error fetching RDF data:', error);
+    }
+}
+
+// Function to determine if the error is an Axios error
+function isAxiosError(error: unknown): error is AxiosError {
+    return (error as AxiosError).isAxiosError !== undefined;
+}
+
+async function generateAndLaunchURL(prefix: string, func: string): Promise<void> {
+    // Generate the path based on the prefix and func
+    const path = `${prefix}/${func}.n3`;
+
+    // Construct the full URL
+    const url = `https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${path}`;
+
+    // Log the URL
+    console.log(`Launching URL: ${url}`);
+
+    try {
+        // Perform a HEAD request to check if the URL exists
+        await axios.head(url);
+
+        // If the HEAD request is successful, proceed to fetch and extract parameters
+        await fetchAndExtractParameters(url);
+    } catch (error) {
+        if (isAxiosError(error)) {  // Type guard for Axios error
+            if (error.response && error.response.status === 404) {
+                console.error('Error: The URL does not exist (404 Not Found)');
+            } else {
+                console.error('Error: Unable to reach the URL or another issue occurred', error.message);
+            }
+        } else {
+            console.error('An unknown error occurred', error);
+        }
+    }
+}
 // connection.onDidChangeWatchedFiles(_change => {
 // 	// Monitored files have change in VSCode
 // 	connection.console.log('We received an file change event');
@@ -518,6 +602,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
 				}
 			});
+
+			// Call the helper function to generate and launch the URL
+			generateAndLaunchURL(prefix, func);
 		},
 		
 
