@@ -522,6 +522,17 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					return ctx.ruleIndex + 1;
 				}
 			}
+			// ADD RECENTLY 
+			// Helper function to determine data type
+			function infer_data_type(value: string) {
+				// Simple checks for basic data types
+				if (value.match(/^\d+$/)) return "integer";
+				if (value.match(/^\d+\.\d+$/)) return "float";
+				if (value.match(/^".*"$/)) return "string";
+				if (value.match(/^\(.*\)$/)) return "list";
+				if (value.startsWith(":")) return "function";
+				return "unknown"; // Could be URI, blank node, etc.
+			}
 		
 			// Ensure that the triple has at least subject and predicateObjectList
 			if (!ctx.children || ctx.children.length < 2) {
@@ -584,6 +595,21 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			}
 		
 			const object = objectList.children[0];
+			 // Extract the text and determine data types
+			 const subjectText = ctx_text(subject);
+			 const verbText = ctx_text(verb);
+			 const objectText = ctx_text(object);
+		 
+			 const subjectType = infer_data_type(subjectText);
+			 const objectType = infer_data_type(objectText);
+		 
+			 // Format the output exactly as required
+			 const output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
+							`verb (first): ${verbText} (rule: ${term_prod(verb)})\n` +
+							`object (first): ${objectText} (rule: ${term_prod(object)}, type: ${objectType})`;
+		 
+			 // Log the output to console
+			 connection.console.log(output);
 		
 			// Log the subject, verb, and object
 			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
@@ -591,8 +617,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
 		
 			// Extract prefix and function from verb
-			const verbText = ctx_text(verb);
+			
 			const [prefix, func] = verbText.split(':');
+
+			
 		
 			// Check if the function exists within the prefix
 			checkFunctionInPrefix(prefix, func).then(functionExists => {
