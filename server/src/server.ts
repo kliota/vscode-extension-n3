@@ -526,8 +526,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			// Helper function to determine data type
 			function infer_data_type(value: string) {
 				// Simple checks for basic data types
-				if (value.match(/^\d+$/)) return "integer";
-				if (value.match(/^\d+\.\d+$/)) return "float";
+				if (value.match(/^-?\d+\.\d+$/)) return "float";
+				if (value.match(/^-?\d+(\.\d+)?$/)) return "integer";
 				if (value.match(/^".*"$/)) return "string";
 				if (value.match(/^\(.*\)$/)) return "list";
 				if (value.startsWith(":")) return "function";
