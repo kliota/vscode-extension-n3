@@ -286,7 +286,10 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
 }
 
 
-async function fetchAndExtractParameters(url: string): Promise<void> {
+async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[] }> {
+    const xsdValues: Set<string> = new Set();
+    const fnoTypes: Set<string> = new Set();
+
     try {
         const response = await axios.get(url);
         const htmlContent = response.data;
@@ -297,28 +300,21 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
 
         if (jsonMatch) {
             const jsonData = JSON.parse(jsonMatch[1]);
-            // Extract the RDF data from the JSON payload
             const rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
             if (rdfData) {
-                // Regex to capture full fno:Parameter blocks
                 const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\s*\]/g;
                 let parameterMatch;
-                
-                // Arrays to hold xsd values and types
-                const xsdValues: Set<string> = new Set(); // Using Set to avoid duplicates
-                const fnoTypes: Set<string> = new Set(); // Using Set to avoid duplicates
 
                 while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
                     const parameterBlock = parameterMatch[0];
 
-                    // Regex to capture fno:type and extract xsd values and rdf types
+                    // Capture fno:type and xsd values
                     const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
                     let typeMatch;
                     while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
                         const typeContent = typeMatch[1].trim();
-                        fnoTypes.add(typeContent);  // Add fno:type to the set
-                        
-                        // Extract xsd values from fno:type content
+                        fnoTypes.add(typeContent);
+
                         const typeXsdRegex = /xsd:[\w-]+/g;
                         let typeXsdMatch;
                         while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
@@ -326,11 +322,10 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
                         }
                     }
 
-                    // Extract owl:unionOf content
+                    // Capture owl:unionOf content
                     const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
                     const unionOfMatch = unionOfRegex.exec(parameterBlock);
                     if (unionOfMatch) {
-                        // Extract xsd values from owl:unionOf content
                         const unionOfXsdRegex = /xsd:[\w-]+/g;
                         let unionOfXsdMatch;
                         while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfMatch[1])) !== null) {
@@ -339,12 +334,8 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
                     }
                 }
 
-                // Convert Sets to Arrays for better logging
-                const xsdValuesArray = Array.from(xsdValues);
-                const fnoTypesArray = Array.from(fnoTypes);
-                
-                console.log('Extracted fno:type values:', fnoTypesArray);
-                console.log('Extracted xsd values:', xsdValuesArray);
+                console.log('Extracted fno:type values:', Array.from(fnoTypes));
+                console.log('Extracted xsd values:', Array.from(xsdValues));
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
@@ -354,6 +345,8 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
+
+    return { xsdValues: Array.from(xsdValues), fnoTypes: Array.from(fnoTypes) };
 }
 
 
@@ -525,16 +518,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 
 		onTriple: function (ctx: any) {
-			// ctx: see ParserRuleContext in n3Main parser (server/src/parser/n3Main_nodrop.js)
-			// ctx structure follows N3 grammar - this ctx corresponds to 'triples' production
-			// (https://w3c.github.io/N3/spec/#grammar-production-triples)
-		
-			// Helper function to extract text from a context
 			function ctx_text(ctx: any) {
 				return text.substring(ctx.start.start, ctx.stop.stop + 1);
 			}
 		
-			// Helper function to get the rule number for the most specific term production
 			function term_prod(ctx: any): any {
 				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
 					return term_prod(ctx.children[0]);
@@ -542,121 +529,60 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					return ctx.ruleIndex + 1;
 				}
 			}
-			// ADD RECENTLY 
-			// Helper function to determine data type
-			function infer_data_type(value: string) {
-				// Simple checks for basic data types
-			
-				if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; // Matches floats and integers, including negatives
-				if (value.match(/^-?\d*\.?\d+([eE][-]?\d+)?$/)) return "double"; // Matches doubles (scientific notation)
-				if (value.match(/^-?\d+\.\d+$/)) return "decimal";
-    			//if (value.match(/^-?\d+(\.\d+)?$/)) return "integer";
-				if (value.match(/^".*"$/)) return "string";
-				if (value.match(/^\(.*\)$/)) return "list";
-				if (value.startsWith(":")) return "function";
-				return "unknown"; // Could be URI, blank node, etc.
-			}
 		
-			// Ensure that the triple has at least subject and predicateObjectList
-			if (!ctx.children || ctx.children.length < 2) {
-				connection.console.log("Warning: Incomplete triple, missing subject or predicateObjectList.");
-				connection.sendDiagnostics({
-					uri: ctx.uri,
-					diagnostics: [{
-						severity: 2, // 2 indicates warning
-						range: {
-							start: { line: ctx.start.line, character: ctx.start.column },
-							end: { line: ctx.stop.line, character: ctx.stop.column }
-						},
-						message: "Incomplete triple, missing subject or predicateObjectList.",
-						source: "N3"
-					}]
-				});
-				return;
+			function infer_data_type(value: string) {
+				if (value.match(/^\(.*\)$/)) return "list";
+				if (value.match(/^-?\d+(\.\d+)?$/)) return "float";
+				if (value.match(/^".*"$/)) return "string";
+				if (value.startsWith(":")) return "function";
+				return "unknown";
 			}
 		
 			const subject: any = ctx.children[0];
 			const predicateObjectList: any = ctx.children[1];
-		
-			// Ensure predicateObjectList has at least verb and objectList
-			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
-				connection.console.log("Warning: Incomplete predicateObjectList, missing verb or objectList.");
-				connection.sendDiagnostics({
-					uri: ctx.uri,
-					diagnostics: [{
-						severity: 2, // 2 indicates warning
-						range: {
-							start: { line: ctx.start.line, character: ctx.start.column },
-							end: { line: ctx.stop.line, character: ctx.stop.column }
-						},
-						message: "Incomplete predicateObjectList, missing verb or objectList.",
-						source: "N3"
-					}]
-				});
-				return;
-			}
-		
 			const verb = predicateObjectList.children[0];
 			const objectList = predicateObjectList.children[1];
-		
-			// Ensure objectList has at least one object
-			if (!objectList.children || objectList.children.length < 1) {
-				connection.console.log("Warning: Incomplete objectList, missing object.");
-				connection.sendDiagnostics({
-					uri: ctx.uri,
-					diagnostics: [{
-						severity: 2, // 2 indicates warning
-						range: {
-							start: { line: ctx.start.line, character: ctx.start.column },
-							end: { line: ctx.stop.line, character: ctx.stop.column }
-						},
-						message: "Incomplete objectList, missing object.",
-						source: "N3"
-					}]
-				});
-				return;
-			}
-		
 			const object = objectList.children[0];
-			 // Extract the text and determine data types
-			 const subjectText = ctx_text(subject);
-			 const verbText = ctx_text(verb);
-			 const objectText = ctx_text(object);
-		 
-			 const subjectType = infer_data_type(subjectText);
-			 const objectType = infer_data_type(objectText);
-		 
-			 // Format the output exactly as required
-			 const output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
-							`verb (first): ${verbText} (rule: ${term_prod(verb)})\n` +
-							`object (first): ${objectText} (rule: ${term_prod(object)}, type: ${objectType})`;
-		 
-			 // Log the output to console
-			 connection.console.log(output);
 		
-			// Log the subject, verb, and object
-			connection.console.log(`subject: ${ctx_text(subject)} (rule: ${term_prod(subject)})`);
-			connection.console.log(`verb (first): ${ctx_text(verb)} ${term_prod(verb)}`);
-			connection.console.log(`object (first): ${ctx_text(object)} ${term_prod(object)}`);
+			const subjectText = ctx_text(subject);
+			const subjectType = infer_data_type(subjectText);
 		
-			// Extract prefix and function from verb
-			
-			const [prefix, func] = verbText.split(':');
-
-			
+			// Format the output
+			const output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
+						   `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
+						   `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
 		
-			// Check if the function exists within the prefix
-			checkFunctionInPrefix(prefix, func).then(functionExists => {
-				if (functionExists) {
-					connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
-				} else {
-					connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
-				}
-			});
-
-			// Call the helper function to generate and launch the URL
-			generateAndLaunchURL(prefix, func);
-		},
+			connection.console.log(output);
+		
+			const [prefix, func] = ctx_text(verb).split(':');
+		
+			// Check if the inputs form a valid triple and if the function exists within the prefix
+			if (subjectText && ctx_text(verb) && ctx_text(object)) {
+				checkFunctionInPrefix(prefix, func).then(functionExists => {
+					if (functionExists) {
+						connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
+		
+						// Call the helper function to generate and launch the URL
+						generateAndLaunchURL(prefix, func).then(async () => {
+							// Fetch the types from the RDF data
+							const { fnoTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
+					
+							// Compare the subject type with fno:type values
+							if (fnoTypes.includes('rdf:List') && subjectType === 'list') {
+								connection.console.log("Both the subject and fno:type match.");
+							} else {
+								connection.console.log("The subject and fno:type do not match.");
+							}
+						});
+					} else {
+						connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+					}
+				});
+			} else {
+				connection.console.log("The input is not a valid triple.");
+			}
+		},		
+		
 		
 
 		onPrefix: function (prefix: string, uri: string) {
