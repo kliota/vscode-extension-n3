@@ -304,17 +304,20 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
                 const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\s*\]/g;
                 let parameterMatch;
                 
-                // Arrays to hold xsd values
+                // Arrays to hold xsd values and types
                 const xsdValues: Set<string> = new Set(); // Using Set to avoid duplicates
+                const fnoTypes: Set<string> = new Set(); // Using Set to avoid duplicates
 
                 while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
                     const parameterBlock = parameterMatch[0];
 
-                    // Regex to capture fno:type and extract xsd values
+                    // Regex to capture fno:type and extract xsd values and rdf types
                     const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
                     let typeMatch;
                     while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
                         const typeContent = typeMatch[1].trim();
+                        fnoTypes.add(typeContent);  // Add fno:type to the set
+                        
                         // Extract xsd values from fno:type content
                         const typeXsdRegex = /xsd:[\w-]+/g;
                         let typeXsdMatch;
@@ -336,8 +339,11 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
                     }
                 }
 
-                // Convert Set to Array for better logging
+                // Convert Sets to Arrays for better logging
                 const xsdValuesArray = Array.from(xsdValues);
+                const fnoTypesArray = Array.from(fnoTypes);
+                
+                console.log('Extracted fno:type values:', fnoTypesArray);
                 console.log('Extracted xsd values:', xsdValuesArray);
             } else {
                 console.log('No RDF data found in the JSON payload.');
@@ -349,6 +355,7 @@ async function fetchAndExtractParameters(url: string): Promise<void> {
         console.error('Error fetching RDF data:', error);
     }
 }
+
 
 
 // Function to determine if the error is an Axios error
