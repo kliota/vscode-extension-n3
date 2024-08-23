@@ -404,28 +404,19 @@ documents.onDidChangeContent((change) => {
 });
 
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
-	// In this simple example we get the settings for every validate run.
-	// const settings = await getDocumentSettings(textDocument.uri);
-
 	const docUri = textDocument.uri;
 
 	curTextDocument = textDocument;
 	const text = textDocument.getText();
 
-	// TODO take into account maxProblems
-	// settings.maxNumberOfProblems
-	// let problems = 0;
-
 	const diagnostics: Diagnostic[] = [];
 	const edits: InsertNamespace[] = [];
 
-	// reset collected auto-complete tokens
-
-	// (ac)
 	acTokens.reset(docUri);
 	acPrefix.clear();
 
-	// connection.console.log("n3?\n" + JSON.stringify(n3, null, 4));
+	let hasSyntaxError = false;  // Syntax error flag
+
 	n3.parse(text, {
 		syntaxError: function (
 			recognizer: any,
@@ -439,7 +430,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				`syntaxError: ${offendingSymbol}-${line}-${column}-${msg}-${err}`
 			);
 
-			// see Token class in n3Main.js
 			const start = { line: line, character: column };
 			const end = start;
 
@@ -454,6 +444,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			};
 
 			diagnostics.push(diagnostic);
+			hasSyntaxError = true;  // Set the flag when a syntax error occurs
 		},
 
 		unknownPrefix: function (
@@ -467,15 +458,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				`unknownPrefix:${prefix}-${pName}-${line}-${start}-${end}`
 			);
 
-			// if nsMode 'automatic' & we know this prefix, let's insert it directly!
 			if (nsMode == NsModes.Automatic && knownNsMap.has(prefix)) {
 				const uri = knownNsMap.get(prefix)!;
 				edits.push(getInsertNamespace(curTextDocument, prefix, uri));
-
-				// else, let's show an error :-(
-				// (coupled with onCodeAction, this can be used for nsMode 'suggest')
 			} else {
-				line = line - 1; // ??
+				line = line - 1;
 				const startPos = { line: line, character: start };
 				const endPos = { line: line, character: start + prefix.length };
 
@@ -506,16 +493,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			);
 		},
 
-		// TODO associate pnames with namespace uris, not prefixes
-		// (already works this way with well-known vocabulary terms)
-
 		onTerm: function (type: string, term: any, ctx: any) {
-			// connection.console.log("onTerm:" + type + ": " + JSON.stringify(term));
-
-			// (ac) collect auto-complete tokens
 			acTokens.add(docUri, type, term);
 		},
-
 
 		onTriple: function (ctx: any) {
 			function ctx_text(ctx: any) {
@@ -526,7 +506,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
 					return term_prod(ctx.children[0]);
 				} else {
-					return ctx.ruleIndex + 1;
+					return ctx ? ctx.ruleIndex + 1 : "unknown";
 				}
 			}
 		
@@ -538,40 +518,79 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				return "unknown";
 			}
 		
+			// Ensure that ctx and its children are defined
+			if (!ctx || !ctx.children || ctx.children.length < 2) {
+				connection.console.log("Invalid context or missing elements in triple.");
+				return;
+			}
+		
 			const subject: any = ctx.children[0];
 			const predicateObjectList: any = ctx.children[1];
+		
+			// Check if predicateObjectList has the required children
+			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
+				connection.console.log("Invalid predicate-object list in triple.");
+				return;
+			}
+		
 			const verb = predicateObjectList.children[0];
 			const objectList = predicateObjectList.children[1];
+		
+			// Check if objectList has at least one child
+			if (!objectList.children || objectList.children.length === 0) {
+				connection.console.log("Invalid object list in triple.");
+				return;
+			}
+		
 			const object = objectList.children[0];
 		
 			const subjectText = ctx_text(subject);
 			const subjectType = infer_data_type(subjectText);
 		
-			// Format the output
 			const output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
 						   `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
 						   `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
 		
 			connection.console.log(output);
 		
-			const [prefix, func] = ctx_text(verb).split(':');
+			const verbText = ctx_text(verb);
+			if (!verbText.includes(':')) {
+				connection.console.log("Invalid verb format; missing prefix and function.");
+				return;
+			}
 		
-			// Check if the inputs form a valid triple and if the function exists within the prefix
-			if (subjectText && ctx_text(verb) && ctx_text(object)) {
+			const [prefix, func] = verbText.split(':');
+		
+			if (subjectText && verbText && ctx_text(object)) {
 				checkFunctionInPrefix(prefix, func).then(functionExists => {
 					if (functionExists) {
 						connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
 		
-						// Call the helper function to generate and launch the URL
 						generateAndLaunchURL(prefix, func).then(async () => {
-							// Fetch the types from the RDF data
-							const { fnoTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
-					
-							// Compare the subject type with fno:type values
-							if (fnoTypes.includes('rdf:List') && subjectType === 'list') {
-								connection.console.log("Both the subject and fno:type match.");
+							if (!hasSyntaxError) {  // Only compare types if no syntax error occurred
+								const { fnoTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
+		
+								const typeMapping: Record<string, string> = {
+									"rdf:List": "list",
+									"xsd:float": "float",
+									"xsd:string": "string",
+									"rdf:Function": "function"
+								};
+		
+								let typeMatched = false;
+								for (const fnoType of fnoTypes) {
+									if (typeMapping[fnoType] === subjectType) {
+										connection.console.log(`The subject and fno:type "${fnoType}" match.`);
+										typeMatched = true;
+										break;
+									}
+								}
+		
+								if (!typeMatched) {
+									connection.console.log("The subject and fno:type do not match.");
+								}
 							} else {
-								connection.console.log("The subject and fno:type do not match.");
+								connection.console.log("Skipping type comparison due to syntax error.");
 							}
 						});
 					} else {
@@ -581,9 +600,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			} else {
 				connection.console.log("The input is not a valid triple.");
 			}
-		},		
-		
-		
+		},			
 
 		onPrefix: function (prefix: string, uri: string) {
 			prefix = String(prefix);
