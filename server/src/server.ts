@@ -515,6 +515,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (value.match(/^-?\d+(\.\d+)?$/)) return "float";
 				if (value.match(/^".*"$/)) return "string";
 				if (value.startsWith(":")) return "function";
+				if (value.startsWith("?")) return "variable";  // Check for variables
 				return "unknown";
 			}
 
@@ -522,6 +523,15 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			function infer_list_item_types(listValue: string): string[] {
 				const items = listValue.slice(1, -1).split(/\s+/);
 				return items.map(infer_data_type);
+			}
+
+			// NEW: Check whether the types of items in a list match the expected types.
+			function validate_variable_types(types: string[], expectedTypes: Set<string>): boolean {
+				for (const type of types) {
+					if (type === "variable") continue;  // Allow variables without complaints
+					if (!expectedTypes.has(type)) return false;  // Type does not match expected types
+				}
+				return true;
 			}
 		
 			// Ensure that ctx and its children are defined
