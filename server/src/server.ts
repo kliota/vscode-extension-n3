@@ -517,6 +517,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (value.startsWith(":")) return "function";
 				return "unknown";
 			}
+
+			// Determine the data types of list members
+			function infer_list_item_types(listValue: string): string[] {
+				const items = listValue.slice(1, -1).split(/\s+/);
+				return items.map(infer_data_type);
+			}
 		
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
@@ -547,10 +553,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			const subjectText = ctx_text(subject);
 			const subjectType = infer_data_type(subjectText);
 		
-			const output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
-						   `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
-						   `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
-		
+			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
+             `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
+             `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
+						   
+			// Handle list type subject and display its item types
+			if (subjectType === "list") {
+				const listItemTypes = infer_list_item_types(subjectText);
+				output += `\nList item types: ${listItemTypes.join(", ")}`;
+			}
+						   
 			connection.console.log(output);
 		
 			const verbText = ctx_text(verb);
