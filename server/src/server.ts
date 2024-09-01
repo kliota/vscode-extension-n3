@@ -334,8 +334,8 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     }
                 }
 
-                console.log('Extracted fno:type values:', Array.from(fnoTypes));
-                console.log('Extracted xsd values:', Array.from(xsdValues));
+                //console.log('Extracted fno:type values:', Array.from(fnoTypes));
+                //console.log('Extracted xsd values:', Array.from(xsdValues));
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
@@ -518,13 +518,13 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (value.startsWith("?")) return "variable";  // Check for variables
 				return "unknown";
 			}
-
+		
 			// Determine the data types of list members
 			function infer_list_item_types(listValue: string): string[] {
 				const items = listValue.slice(1, -1).split(/\s+/);
 				return items.map(infer_data_type);
 			}
-
+		
 			// NEW: Check whether the types of items in a list match the expected types.
 			function validate_variable_types(types: string[], expectedTypes: Set<string>): boolean {
 				for (const type of types) {
@@ -564,15 +564,15 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			const subjectType = infer_data_type(subjectText);
 		
 			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
-             `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
-             `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
-						   
-			// Handle list type subject and display its item types
+						 `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
+						 `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
+		
+			let listItemTypes: string[] = [];
 			if (subjectType === "list") {
-				const listItemTypes = infer_list_item_types(subjectText);
+				listItemTypes = infer_list_item_types(subjectText);
 				output += `\nList item types: ${listItemTypes.join(", ")}`;
 			}
-						   
+		
 			connection.console.log(output);
 		
 			const verbText = ctx_text(verb);
@@ -590,7 +590,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		
 						generateAndLaunchURL(prefix, func).then(async () => {
 							if (!hasSyntaxError) {  // Only compare types if no syntax error occurred
-								const { fnoTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
+								const { fnoTypes, xsdValues } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
 		
 								const typeMapping: Record<string, string> = {
 									"rdf:List": "list",
@@ -602,15 +602,38 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								let typeMatched = false;
 								for (const fnoType of fnoTypes) {
 									if (typeMapping[fnoType] === subjectType) {
-										connection.console.log(`The subject and fno:type "${fnoType}" match.`);
+										connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
 										typeMatched = true;
 										break;
 									}
 								}
 		
 								if (!typeMatched) {
-									connection.console.log("The subject and fno:type do not match.");
+									for (const fnoType of fnoTypes) {
+										connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
+									}
 								}
+		
+								// Validate list item types against xsdValues if the subject is a list
+								if (subjectType === "list" && xsdValues.length > 0) {
+									const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
+									const isValid = validate_variable_types(listItemTypes, xsdTypeSet);
+		
+									if (isValid) {
+										connection.console.log(
+											`The list item datatypes of subject "(1 ?x)" (list item types: ${listItemTypes.join(", ")}) ` +
+											`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
+										);
+									} else {
+										connection.console.log(
+											`The list item datatypes of subject "(1 ?x)" (list item types: ${listItemTypes.join(", ")}) ` +
+											`do not match the expected xsd:type values (${xsdValues.join(", ")}).`
+										);
+									}
+								} else if (subjectType !== "list" && typeMatched) {
+									connection.console.log(`The subject datatype ${subjectType} exists in extracted fno type.`);
+								}
+		
 							} else {
 								connection.console.log("Skipping type comparison due to syntax error.");
 							}
@@ -622,7 +645,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			} else {
 				connection.console.log("The input is not a valid triple.");
 			}
-		},			
+		},
+		
+		
+						
 
 		onPrefix: function (prefix: string, uri: string) {
 			prefix = String(prefix);
