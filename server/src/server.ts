@@ -511,18 +511,23 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			}
 		
 			function infer_data_type(value: string) {
+				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas";  // Recognize lists of formulas
+				if (value.match(/^\{.*\}$/s)) return "formula";  // Recognize individual formulas
 				if (value.match(/^\(.*\)$/)) return "list";
 				if (value.match(/^-?\d+(\.\d+)?$/)) return "float";
 				if (value.match(/^".*"$/)) return "string";
 				if (value.startsWith(":")) return "function";
 				if (value.startsWith("?")) return "variable";  // Check for variables
+				if (value.startsWith("<") && value.endsWith(">")) return "uri";  // Recognize URIs
 				return "unknown";
 			}
 		
-			// Determine the data types of list members
+			// Function to infer types of items in a list, including handling nested structures
 			function infer_list_item_types(listValue: string): string[] {
-				const items = listValue.slice(1, -1).split(/\s+/);
-				return items.map(infer_data_type);
+				const items = listValue
+					.slice(1, -1)
+					.match(/\{.*?\}|\S+/g);  // Handle nested structures and plain items
+				return items ? items.map(infer_data_type) : [];
 			}
 		
 			// NEW: Check whether the types of items in a list match the expected types.
@@ -564,11 +569,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			const subjectType = infer_data_type(subjectText);
 		
 			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
-						 `verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
-						 `object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
+				`verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
+				`object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${infer_data_type(ctx_text(object))})`;
 		
 			let listItemTypes: string[] = [];
-			if (subjectType === "list") {
+			if (subjectType === "list" || subjectType === "listOfFormulas") {
 				listItemTypes = infer_list_item_types(subjectText);
 				output += `\nList item types: ${listItemTypes.join(", ")}`;
 			}
@@ -596,7 +601,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									"rdf:List": "list",
 									"xsd:float": "float",
 									"xsd:string": "string",
-									"rdf:Function": "function"
+									"rdf:Function": "function",
+									"log:Formula": "listOfFormulas",  // Mapping for formulas
+									"log:uri": "uri"  // Mapping for URIs
 								};
 		
 								let typeMatched = false;
@@ -614,26 +621,41 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									}
 								}
 		
-								// Validate list item types against xsdValues if the subject is a list
-								if (subjectType === "list" && xsdValues.length > 0) {
-									const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-									const isValid = validate_variable_types(listItemTypes, xsdTypeSet);
+								// Check if the subject is a list, then validate each item type
+								if (subjectType === "list" || subjectType === "listOfFormulas") {
+									const expectedType = fnoTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
 		
-									if (isValid) {
-										connection.console.log(
-											`The list item datatypes of subject "(1 ?x)" (list item types: ${listItemTypes.join(", ")}) ` +
-											`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
-										);
-									} else {
-										connection.console.log(
-											`The list item datatypes of subject "(1 ?x)" (list item types: ${listItemTypes.join(", ")}) ` +
-											`do not match the expected xsd:type values (${xsdValues.join(", ")}).`
-										);
+									if (expectedType) {
+										const isValid = listItemTypes.every(type => type === "formula" || type === "variable");
+		
+										if (isValid) {
+											connection.console.log(
+												`The list item datatypes of subject "${subjectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`are valid for the expected type log:Formula.`
+											);
+										} else {
+											connection.console.log(
+												`The list item datatypes of subject "${subjectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`are not valid for the expected type log:Formula.`
+											);
+										}
+									} else if (xsdValues.length > 0) {
+										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
+										const isValid = validate_variable_types(listItemTypes, xsdTypeSet);
+		
+										if (isValid) {
+											connection.console.log(
+												`The list item datatypes of subject (list item types: ${listItemTypes.join(", ")}) ` +
+												`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
+											);
+										} else {
+											connection.console.log(
+												`The list item datatypes of subject "${subjectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`do not match the expected xsd:type values (${xsdValues.join(", ")}).`
+											);
+										}
 									}
-								} else if (subjectType !== "list" && typeMatched) {
-									connection.console.log(`The subject datatype ${subjectType} exists in extracted fno type.`);
 								}
-		
 							} else {
 								connection.console.log("Skipping type comparison due to syntax error.");
 							}
@@ -645,9 +667,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			} else {
 				connection.console.log("The input is not a valid triple.");
 			}
-		},
-		
-		
+		},											
+				
 						
 
 		onPrefix: function (prefix: string, uri: string) {
