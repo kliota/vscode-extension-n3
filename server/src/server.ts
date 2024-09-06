@@ -376,10 +376,10 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 					}
 				}
 
-                console.log('Extracted fno:type values:', Array.from(fnoTypes));
-                console.log('Extracted xsd values:', Array.from(xsdValues));
-                console.log('Extracted subject types:', Array.from(subjectTypes));
-                console.log('Extracted object types:', Array.from(objectTypes));
+                //console.log('Extracted fno:type values:', Array.from(fnoTypes));
+                //console.log('Extracted xsd values:', Array.from(xsdValues));
+                //console.log('Extracted subject types:', Array.from(subjectTypes));
+                //console.log('Extracted object types:', Array.from(objectTypes));
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
@@ -559,23 +559,27 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				}
 			}
 		
-			function infer_data_type(value: string) {
-				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas";  // Recognize lists of formulas
-				if (value.match(/^\{.*\}$/s)) return "formula";  // Recognize individual formulas
-				if (value.match(/^\(.*\)$/)) return "list";
-				if (value.match(/^-?\d+(\.\d+)?$/)) return "float";
-				if (value.match(/^".*"$/)) return "string";
-				if (value.startsWith(":")) return "function";
-				if (value.startsWith("?")) return "variable";  // Check for variables
-				if (value.startsWith("<") && value.endsWith(">")) return "uri";  // Recognize URIs
+			function infer_data_type(value: string): string {
+				// Recognize different data types
+				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas"; // Recognize lists of formulas
+				if (value.match(/^\{.*\}$/s)) return "formula"; // Recognize individual formulas
+				if (value.match(/^\(.*\)$/)) return "list"; // Recognize lists
+				if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; // Recognize floats
+				if (value.match(/^".*"$/)) return "string"; // Recognize strings
+				if (value.startsWith(":")) return "function"; // Recognize functions
+				if (value.startsWith("?")) return "variable"; // Recognize variables
+				if (value.startsWith("<") && value.endsWith(">")) return "uri"; // Recognize URIs
 				return "unknown";
 			}
 		
-			// Function to infer types of items in a list, including handling nested structures
+			// Function to infer types of items in a list, including handling nested structures for depth 1
 			function infer_list_item_types(listValue: string): string[] {
+				// Match nested lists, formulas, or individual items
 				const items = listValue
-					.slice(1, -1)
-					.match(/\{.*?\}|\S+/g);  // Handle nested structures and plain items
+					.slice(1, -1) // Remove outer parentheses
+					.match(/\(\s*\{.*?\}\s*\)|\{.*?\}|\(.*?\)|\S+/g); // Match nested formulas, lists, or plain items
+
+				// For each item, recursively infer its type
 				return items ? items.map(infer_data_type) : [];
 			}
 		
