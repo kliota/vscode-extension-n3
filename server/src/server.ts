@@ -311,78 +311,75 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                 let parameterMatch;
 
                 while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
-                    const parameterBlock = parameterMatch[0];
-
+					const parameterBlock = parameterMatch[0];
+				
 					// Check if the parameter is subject or object
-                    const positionRegex = /fnon:position\s+fnon:(\w+)/;
-                    const positionMatch = positionRegex.exec(parameterBlock);
-                    let isSubject = false;
-                    let isObject = false;
-                    if (positionMatch) {
-                        if (positionMatch[1] === 'subject') {
-                            isSubject = true;
-                        } else if (positionMatch[1] === 'object') {
-                            isObject = true;
-                        }
-                    }
-
-                    // Capture fno:type and xsd values
-                    const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
-                    let typeMatch;
-                    while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
-                        const typeContent = typeMatch[1].trim();
-                        fnoTypes.add(typeContent);
-
-						// Handle RDF List (element as list type)
-                        if (typeContent.includes('rdf:List')) {
-                            if (isSubject) {
-                                subjectTypes.add('rdf:List');
-                            } else if  (isObject) {
-								objectTypes.add('rdf:List');
+					const positionRegex = /fnon:position\s+fnon:(\w+)/;
+					const positionMatch = positionRegex.exec(parameterBlock);
+					const isSubject = positionMatch && positionMatch[1] === 'subject';
+					const isObject = positionMatch && positionMatch[1] === 'object';
+				
+					// Capture fno:type for either subject or object
+					const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
+					let typeMatch;
+					while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
+						const typeContent = typeMatch[1].trim();
+				
+						// Add fno:type globally
+						fnoTypes.add(typeContent);
+				
+						// Handle subject types explicitly
+						if (isSubject) {
+							subjectTypes.add(typeContent);  // Add any type (log:Uri, rdf:List, etc.) for the subject
+				
+							// Check for XSD-specific types within the subject type
+							const typeXsdRegex = /xsd:[\w-]+/g;
+							let typeXsdMatch;
+							while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
+								xsdValues.add(typeXsdMatch[0]);
+								subjectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the subject
 							}
-                        }
+						}
+				
+						// Handle object types explicitly
+						if (isObject) {
+							objectTypes.add(typeContent);  // Add any type (xsd:string, rdf:List, etc.) for the object
+				
+							// Check for XSD-specific types within the object type
+							const typeXsdRegex = /xsd:[\w-]+/g;
+							let typeXsdMatch;
+							while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
+								xsdValues.add(typeXsdMatch[0]);
+								objectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the object
+							}
+						}
+					}
+				
+					// Capture owl:unionOf content for both subject and object types
+					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
+					const unionOfMatch = unionOfRegex.exec(parameterBlock);
+					if (unionOfMatch) {
+						const unionOfContent = unionOfMatch[1];
+				
+						// Extract XSD types from unionOf for subject or object
+						const unionOfXsdRegex = /xsd:[\w-]+/g;
+						let unionOfXsdMatch;
+						while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
+							xsdValues.add(unionOfXsdMatch[0]);
+				
+							if (isSubject) {
+								subjectTypes.add(unionOfXsdMatch[0]);
+							} else if (isObject) {
+								objectTypes.add(unionOfXsdMatch[0]);
+							}
+						}
+					}
+				}
 
-						// Extract xsd types within lists (if applicable)
-                        const typeXsdRegex = /xsd:[\w-]+/g;
-                        let typeXsdMatch;
-                        while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
-                            xsdValues.add(typeXsdMatch[0]);
-
-                            // Add type to subject or object set
-                            if (isSubject) {
-                                subjectTypes.add(typeXsdMatch[0]);
-                            } else if (isObject) {
-                                objectTypes.add(typeXsdMatch[0]);
-                            }
-                        }
-                    }
-
-                    // Capture owl:unionOf content as individual xsd types
-                    const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
-                    const unionOfMatch = unionOfRegex.exec(parameterBlock);
-                    if (unionOfMatch) {
-                        const unionOfContent = unionOfMatch[1];
-
-                        // Extract each individual xsd type within the unionOf block
-                        const unionOfXsdRegex = /xsd:[\w-]+/g;
-                        let unionOfXsdMatch;
-                        while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
-                            xsdValues.add(unionOfXsdMatch[0]);
-
-                            // Add unionOf types to subject or object set
-                            if (isSubject) {
-                                subjectTypes.add(unionOfXsdMatch[0]);
-                            } else if (isObject) {
-                                objectTypes.add(unionOfXsdMatch[0]);
-                            }
-                        }
-                    }
-                }
-
-                // console.log('Extracted fno:type values:', Array.from(fnoTypes));
-                // console.log('Extracted xsd values:', Array.from(xsdValues));
-                // console.log('Extracted subject types:', Array.from(subjectTypes));
-                // console.log('Extracted object types:', Array.from(objectTypes));
+                console.log('Extracted fno:type values:', Array.from(fnoTypes));
+                console.log('Extracted xsd values:', Array.from(xsdValues));
+                console.log('Extracted subject types:', Array.from(subjectTypes));
+                console.log('Extracted object types:', Array.from(objectTypes));
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
@@ -626,18 +623,21 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
 				`verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
 				`object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${objectType})`;
-		
-			let listItemTypes: string[] = [];
+			let subjectListItemTypes: string[] = [];
+			let objectListItemTypes: string[] = [];  // Separate array for object list item types
+				
+			// Check and infer subject list item types
 			if (subjectType === "list" || subjectType === "listOfFormulas") {
-				listItemTypes = infer_list_item_types(subjectText);
-				output += `\nSubject list item types: ${listItemTypes.join(", ")}`;
+				subjectListItemTypes = infer_list_item_types(subjectText);
+				output += `\nSubject list item types: ${subjectListItemTypes.join(", ")}`;
 			}
-			
+				
+			// Check and infer object list item types
 			if (objectType === "list" || objectType === "listOfFormulas") {
-				listItemTypes = infer_list_item_types(objectText);
-				output += `\nObject list item types: ${listItemTypes.join(", ")}`;
+				objectListItemTypes = infer_list_item_types(objectText);
+				output += `\nObject list item types: ${objectListItemTypes.join(", ")}`;
 			}
-		
+				
 			connection.console.log(output);
 		
 			const verbText = ctx_text(verb);
@@ -663,60 +663,63 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								const { fnoTypes, xsdValues, subjectTypes, objectTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
 		
 								const typeMapping: Record<string, string> = {
-									"rdf:List": "list",
+									"rdf:List": "list",  // Treats rdf:List as a list
 									"xsd:float": "float",
 									"xsd:string": "string",
 									"rdf:Function": "function",
-									"log:Formula": "listOfFormulas",  // Mapping for formulas
-									"log:uri": "uri"  // Mapping for URIs
+									"log:Formula": "listOfFormulas",  // Maps log:Formula to listOfFormulas
+									"log:Uri": "uri"  // URI mapping
+									
 								};
 		
 								// Subject type matching test
 								let subjectTypeMatched = false;
 								for (const fnoType of subjectTypes) {
-									if (typeMapping[fnoType] === subjectType) {
+									// Check if either rdf:List or log:Formula is expected and allow for both list and listOfFormulas types
+									if (typeMapping[fnoType] === subjectType || 
+										(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
+										(fnoType === "log:Formula" && subjectType === "list")) {
 										connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
 										subjectTypeMatched = true;
 										break;
 									}
 								}
-		
 								if (!subjectTypeMatched) {
 									for (const fnoType of subjectTypes) {
 										connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
-		
+								
 								// Check if the subject is a list, then validate each item type
 								if (subjectType === "list" || subjectType === "listOfFormulas") {
 									const expectedType = subjectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
-		
+								
 									if (expectedType) {
-										const isValid = listItemTypes.every(type => type === "formula" || type === "variable");
-		
+										const isValid = subjectListItemTypes.every(type => type === "formula" || type === "variable");
+								
 										if (isValid) {
 											connection.console.log(
-												`The list item datatypes of subject "${subjectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of subject "${subjectText}" (list item types: ${subjectListItemTypes.join(", ")}) ` +
 												`are valid for the expected type log:Formula.`
 											);
 										} else {
 											connection.console.log(
-												`The list item datatypes of subject "${subjectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of subject "${subjectText}" (list item types: ${subjectListItemTypes.join(", ")}) ` +
 												`are not valid for the expected type log:Formula.`
 											);
 										}
 									} else if (xsdValues.length > 0) {
 										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-										const isValid = validate_variable_types(listItemTypes, xsdTypeSet);
+										const isValid = validate_variable_types(subjectListItemTypes, xsdTypeSet);
 		
 										if (isValid) {
 											connection.console.log(
-												`The list item datatypes of subject (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of subject (list item types: ${subjectListItemTypes.join(", ")}) ` +
 												`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
 											);
 										} else {
 											connection.console.log(
-												`The list item datatypes of subject "${subjectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of subject "${subjectText}" (list item types: ${subjectListItemTypes.join(", ")}) ` +
 												`do not match the expected xsd:type values (${xsdValues.join(", ")}).`
 											);
 										}
@@ -726,49 +729,53 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								// Object type matching test
 								let objectTypeMatched = false;
 								for (const fnoType of objectTypes) {
-									if (typeMapping[fnoType] === objectType) {
+									// Same logic for object: Allow rdf:List to match with listOfFormulas and vice versa
+									if (typeMapping[fnoType] === objectType || 
+										(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
+										(fnoType === "log:Formula" && objectType === "list")) {
 										connection.console.log(`The object type ${objectType} and fno:type "${fnoType}" match.`);
 										objectTypeMatched = true;
 										break;
 									}
 								}
-		
+								
 								if (!objectTypeMatched) {
 									for (const fnoType of objectTypes) {
 										connection.console.log(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
+								
 		
 								// Check if the object is a list, then validate each item type
 								if (objectType === "list" || objectType === "listOfFormulas") {
 									const expectedType = objectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
-		
+								
 									if (expectedType) {
-										const isValid = listItemTypes.every(type => type === "formula" || type === "variable");
-		
+										const isValid = objectListItemTypes.every(type => type === "formula" || type === "variable");
+								
 										if (isValid) {
 											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
 												`are valid for the expected type log:Formula.`
 											);
 										} else {
 											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
 												`are not valid for the expected type log:Formula.`
 											);
 										}
 									} else if (xsdValues.length > 0) {
 										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-										const isValid = validate_variable_types(listItemTypes, xsdTypeSet);
+										const isValid = validate_variable_types(objectListItemTypes, xsdTypeSet);
 		
 										if (isValid) {
 											connection.console.log(
-												`The list item datatypes of object (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of object (list item types: ${objectListItemTypes.join(", ")}) ` +
 												`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
 											);
 										} else {
 											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${listItemTypes.join(", ")}) ` +
+												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
 												`do not match the expected xsd:type values (${xsdValues.join(", ")}).`
 											);
 										}
