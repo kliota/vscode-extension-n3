@@ -294,16 +294,19 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
     try {
         const response = await axios.get(url);
-        const htmlContent = response.data;
+		let rdfData = response.data;
 
         // Extract JSON data from the script tag
         const jsonRegex = /<script type="application\/json" data-target="react-app\.embeddedData">({.*?})<\/script>/;
-        const jsonMatch = htmlContent.match(jsonRegex);
+        const jsonMatch = rdfData.match(jsonRegex);
 
         if (jsonMatch) {
             const jsonData = JSON.parse(jsonMatch[1]);
-            const rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
+            rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
             if (rdfData) {
+                // Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
+                rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
+
                 const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\s*\]/g;
                 let parameterMatch;
 
@@ -638,7 +641,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			connection.console.log(output);
 		
 			const verbText = ctx_text(verb);
-			if (!verbText.includes(':')) {
+			// Handle special cases for '=>' and '<='
+			if (verbText === '=>' || verbText === '<=') {
+				const correspondingFunction = verbText === '=>' ? 'log:implies' : 'log:impliedBy';
+				connection.console.log(`The verb "${verbText}" is recognized as a shorthand for "${correspondingFunction}".`);
+				// Handle the logic as needed for these cases, no need for prefix validation
+			} else if (!verbText.includes(':')) {
 				connection.console.log("Invalid verb format; missing prefix and function.");
 				return;
 			}
