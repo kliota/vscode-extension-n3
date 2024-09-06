@@ -563,7 +563,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				// Recognize different data types
 				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas"; // Recognize lists of formulas
 				if (value.match(/^\{.*\}$/s)) return "formula"; // Recognize individual formulas
-				if (value.match(/^\(.*\)$/)) return "list"; // Recognize lists
+				if (value.match(/^\(.*\)$/s)) return "list"; // Recognize lists, including nested lists
 				if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; // Recognize floats
 				if (value.match(/^".*"$/)) return "string"; // Recognize strings
 				if (value.startsWith(":")) return "function"; // Recognize functions
@@ -572,15 +572,58 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				return "unknown";
 			}
 		
-			// Function to infer types of items in a list, including handling nested structures for depth 1
+			// Recursive function to infer types of items in a list, handling nested lists and formulas of any depth
 			function infer_list_item_types(listValue: string): string[] {
-				// Match nested lists, formulas, or individual items
-				const items = listValue
-					.slice(1, -1) // Remove outer parentheses
-					.match(/\(\s*\{.*?\}\s*\)|\{.*?\}|\(.*?\)|\S+/g); // Match nested formulas, lists, or plain items
+				// Remove outer parentheses
+				const innerValue = listValue.slice(1, -1).trim();
+				const items: string[] = [];
 
-				// For each item, recursively infer its type
-				return items ? items.map(infer_data_type) : [];
+				let depth = 0;
+				let currentItem = "";
+				let insideFormula = false;
+
+				// Traverse the innerValue character by character
+				for (let i = 0; i < innerValue.length; i++) {
+					const char = innerValue[i];
+
+					// Track formulas enclosed in curly braces
+					if (char === '{') {
+						if (depth === 0 && currentItem.trim()) {
+							items.push(currentItem.trim());
+							currentItem = "";
+						}
+						insideFormula = true;
+					} else if (char === '}') {
+						insideFormula = false;
+					}
+
+					// Track lists enclosed in parentheses
+					if (char === '(' && !insideFormula) {
+						if (depth === 0 && currentItem.trim()) {
+							items.push(currentItem.trim());
+							currentItem = "";
+						}
+						depth++;
+					} else if (char === ')' && !insideFormula) {
+						depth--;
+					}
+
+					currentItem += char;
+
+					// If depth is 0 and not inside a formula, we've completed an item
+					if (depth === 0 && !insideFormula && currentItem.trim()) {
+						items.push(currentItem.trim());
+						currentItem = "";
+					}
+				}
+
+				// Handle any remaining item outside of nested structures
+				if (currentItem.trim()) {
+					items.push(currentItem.trim());
+				}
+
+				// Recursively infer the type of each item
+				return items.map(infer_data_type);
 			}
 		
 			// NEW: Check whether the types of items in a list match the expected types.
