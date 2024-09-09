@@ -547,6 +547,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		},
 
 		onTriple: function (ctx: any) {
+			let variableTypes: Record<string, string> = {};  // Store variable and expected types
 			function ctx_text(ctx: any) {
 				return text.substring(ctx.start.start, ctx.stop.stop + 1);
 			}
@@ -577,64 +578,78 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				// Remove outer parentheses
 				const innerValue = listValue.slice(1, -1).trim();
 				const items: string[] = [];
-
+				
 				let depth = 0;
 				let currentItem = "";
 				let insideFormula = false;
-
+				let insideQuote = false;
+			
 				// Traverse the innerValue character by character
 				for (let i = 0; i < innerValue.length; i++) {
 					const char = innerValue[i];
-
+			
+					// Track if we're inside a quoted string
+					if (char === '"' && innerValue[i - 1] !== '\\') {
+						insideQuote = !insideQuote;
+					}
+			
 					// Track formulas enclosed in curly braces
-					if (char === '{') {
+					if (char === '{' && !insideQuote) {
 						if (depth === 0 && currentItem.trim()) {
 							items.push(currentItem.trim());
 							currentItem = "";
 						}
 						insideFormula = true;
-					} else if (char === '}') {
+					} else if (char === '}' && !insideQuote) {
 						insideFormula = false;
 					}
-
+			
 					// Track lists enclosed in parentheses
-					if (char === '(' && !insideFormula) {
+					if (char === '(' && !insideFormula && !insideQuote) {
 						if (depth === 0 && currentItem.trim()) {
 							items.push(currentItem.trim());
 							currentItem = "";
 						}
 						depth++;
-					} else if (char === ')' && !insideFormula) {
+					} else if (char === ')' && !insideFormula && !insideQuote) {
 						depth--;
 					}
-
+			
 					currentItem += char;
-
-					// If depth is 0 and not inside a formula, we've completed an item
-					if (depth === 0 && !insideFormula && currentItem.trim()) {
+			
+					// If depth is 0, we're not inside a formula or a quote, and the current item is complete
+					if (depth === 0 && !insideFormula && !insideQuote && currentItem.trim() && (char === ' ' || i === innerValue.length - 1)) {
 						items.push(currentItem.trim());
 						currentItem = "";
 					}
 				}
-
+			
 				// Handle any remaining item outside of nested structures
 				if (currentItem.trim()) {
 					items.push(currentItem.trim());
 				}
-
+			
 				// Recursively infer the type of each item
-				return items.map(infer_data_type);
-			}
+				return items.map(item => infer_data_type(item));
+			}						
 		
 			// NEW: Check whether the types of items in a list match the expected types.
-			function validate_variable_types(types: string[], expectedTypes: Set<string>): boolean {
+			function validate_variable_types(types: string[], expectedTypes: Set<string>, variableTypes: Record<string, string>): boolean {
 				for (const type of types) {
-					if (type === "variable") continue;  // Allow variables without complaints
-					if (!expectedTypes.has(type)) return false;  // Type does not match expected types
+					if (type === "variable") {
+						// Check if the variable's expected type is in the expected types
+						const expectedType = Object.values(variableTypes).find(v => v === type);
+						if (expectedType && expectedTypes.has(expectedType)) {
+							continue;
+						} else {
+							return false;
+						}
+					} else if (!expectedTypes.has(type)) {
+						return false;
+					}
 				}
 				return true;
 			}
-		
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
 				connection.console.log("Invalid context or missing elements in triple.");
@@ -666,19 +681,23 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 			const objectText = ctx_text(object);
 			const objectType = infer_data_type(objectText);
-		
-			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
+			
+			
+			// Construct the output string, ensuring the expected type is included
+			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType}\n` +
 				`verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
 				`object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${objectType})`;
+						
+		
 			let subjectListItemTypes: string[] = [];
 			let objectListItemTypes: string[] = [];  // Separate array for object list item types
-				
+		
 			// Check and infer subject list item types
 			if (subjectType === "list" || subjectType === "listOfFormulas") {
 				subjectListItemTypes = infer_list_item_types(subjectText);
 				output += `\nSubject list item types: ${subjectListItemTypes.join(", ")}`;
 			}
-				
+		
 			// Check and infer object list item types
 			if (objectType === "list" || objectType === "listOfFormulas") {
 				objectListItemTypes = infer_list_item_types(objectText);
@@ -710,20 +729,36 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								const { fnoTypes, xsdValues, subjectTypes, objectTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
 		
 								const typeMapping: Record<string, string> = {
-									"rdf:List": "list",  // Treats rdf:List as a list
+									"rdf:List": "list",  // Treat rdf:List as a list
 									"xsd:float": "float",
 									"xsd:string": "string",
 									"rdf:Function": "function",
 									"log:Formula": "listOfFormulas",  // Maps log:Formula to listOfFormulas
 									"log:Uri": "uri"  // URI mapping
-									
 								};
+		
+								// If subject or object is a variable, store the expected type from fno:type (xsdValues)
+								if (subjectType === "variable") {
+									const expectedTypeForSubject = xsdValues.length > 0 ? xsdValues[0] : null;
+									if (expectedTypeForSubject) {
+										variableTypes[subjectText] = typeMapping[expectedTypeForSubject] || expectedTypeForSubject;
+										connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
+									}
+								}
+								
+								if (objectType === "variable") {
+									const expectedTypeForObject = xsdValues.length > 1 ? xsdValues[1] : xsdValues[0];
+									if (expectedTypeForObject) {
+										variableTypes[objectText] = typeMapping[expectedTypeForObject] || expectedTypeForObject;
+										connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
+									}
+								}
 		
 								// Subject type matching test
 								let subjectTypeMatched = false;
 								for (const fnoType of subjectTypes) {
-									// Check if either rdf:List or log:Formula is expected and allow for both list and listOfFormulas types
-									if (typeMapping[fnoType] === subjectType || 
+									if (subjectType === "variable" || 
+										typeMapping[fnoType] === subjectType || 
 										(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
 										(fnoType === "log:Formula" && subjectType === "list")) {
 										connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
@@ -731,6 +766,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										break;
 									}
 								}
+								
 								if (!subjectTypeMatched) {
 									for (const fnoType of subjectTypes) {
 										connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
@@ -742,9 +778,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									const expectedType = subjectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
 								
 									if (expectedType) {
-										const isValid = subjectListItemTypes.every(type => type === "formula" || type === "variable");
+										const isValidSubject = subjectListItemTypes.every(type => type === "formula" || type === "variable");
 								
-										if (isValid) {
+										if (isValidSubject) {
 											connection.console.log(
 												`The list item datatypes of subject "${subjectText}" (list item types: ${subjectListItemTypes.join(", ")}) ` +
 												`are valid for the expected type log:Formula.`
@@ -757,9 +793,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 									} else if (xsdValues.length > 0) {
 										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-										const isValid = validate_variable_types(subjectListItemTypes, xsdTypeSet);
+										const isValidSubject = validate_variable_types(subjectListItemTypes, xsdTypeSet, variableTypes);
 		
-										if (isValid) {
+										if (isValidSubject) {
 											connection.console.log(
 												`The list item datatypes of subject (list item types: ${subjectListItemTypes.join(", ")}) ` +
 												`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
@@ -776,11 +812,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								// Object type matching test
 								let objectTypeMatched = false;
 								for (const fnoType of objectTypes) {
-									// Same logic for object: Allow rdf:List to match with listOfFormulas and vice versa
-									if (typeMapping[fnoType] === objectType || 
+									// Check if object type is a variable, or if either rdf:List or log:Formula is expected
+									if (objectType === "variable" || 
+										typeMapping[fnoType] === objectType || 
 										(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
 										(fnoType === "log:Formula" && objectType === "list")) {
-										connection.console.log(`The object type ${objectType} and fno:type "${fnoType}" match.`);
+										connection.console.log(`The object data type ${objectType}-${fnoType} and fno:type "${fnoType}" match.`);
 										objectTypeMatched = true;
 										break;
 									}
@@ -791,16 +828,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										connection.console.log(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
-								
-		
 								// Check if the object is a list, then validate each item type
 								if (objectType === "list" || objectType === "listOfFormulas") {
 									const expectedType = objectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
 								
 									if (expectedType) {
-										const isValid = objectListItemTypes.every(type => type === "formula" || type === "variable");
+										const isValidObject = objectListItemTypes.every(type => type === "formula" || type === "variable");
 								
-										if (isValid) {
+										if (isValidObject) {
 											connection.console.log(
 												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
 												`are valid for the expected type log:Formula.`
@@ -813,9 +848,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 									} else if (xsdValues.length > 0) {
 										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-										const isValid = validate_variable_types(objectListItemTypes, xsdTypeSet);
+										const isValidObject = validate_variable_types(objectListItemTypes, xsdTypeSet, variableTypes);
 		
-										if (isValid) {
+										if (isValidObject) {
 											connection.console.log(
 												`The list item datatypes of object (list item types: ${objectListItemTypes.join(", ")}) ` +
 												`exist in the extracted xsd:type values (${xsdValues.join(", ")}).`
