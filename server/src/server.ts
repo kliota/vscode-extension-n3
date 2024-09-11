@@ -286,11 +286,12 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
 }
 
 
-async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[] }> {
+async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[], listElementInfo: { elementCount?: number }[] }> {
     const xsdValues: Set<string> = new Set();
     const fnoTypes: Set<string> = new Set();
 	const subjectTypes: Set<string> = new Set();
     const objectTypes: Set<string> = new Set();
+	const listElementInfo: { elementCount?: number }[] = [];
 
     try {
         const response = await axios.get(url);
@@ -307,11 +308,12 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                 // Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
                 rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
 
-                const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\s*\]/g;
-                let parameterMatch;
+                const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
+				let parameterMatch;
 
-                while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
+				while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
 					const parameterBlock = parameterMatch[0];
+					//connection.console.log(`\nCaptured Parameter block: \n${parameterBlock}\n`);
 				
 					// Check if the parameter is subject or object
 					const positionRegex = /fnon:position\s+fnon:(\w+)/;
@@ -354,7 +356,23 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 							}
 						}
 					}
-				
+									
+					// Check whether the list has fixed number of elements
+					const fixedListElementRegex = /fno:predicate\s+"\$s\.(\d+)"/g;
+					let elementCount = 0;
+					let fixedMatch;
+
+					// Count the number of list elements
+					while ((fixedMatch = fixedListElementRegex.exec(parameterBlock)) !== null) {
+						elementCount = Math.max(elementCount, parseInt(fixedMatch[1]));
+					}
+
+					// If elementCount > 0, it's a fixed list; store the element count
+					if (elementCount > 0) {
+						listElementInfo.push({ elementCount });
+						connection.console.log(`The list is expected to have ${elementCount} elements.`);
+					}
+
 					// Capture owl:unionOf content for both subject and object types
 					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
 					const unionOfMatch = unionOfRegex.exec(parameterBlock);
@@ -394,7 +412,8 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
         xsdValues: Array.from(xsdValues), 
         fnoTypes: Array.from(fnoTypes), 
         subjectTypes: Array.from(subjectTypes), 
-        objectTypes: Array.from(objectTypes) 
+        objectTypes: Array.from(objectTypes),
+		listElementInfo
     };
 }
 
@@ -736,7 +755,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		
 						generateAndLaunchURL(prefix, func).then(async () => {
 							if (!hasSyntaxError) {  // Only compare types if no syntax error occurred
-								const { fnoTypes, xsdValues, subjectTypes, objectTypes } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
+								const { fnoTypes, xsdValues, subjectTypes, objectTypes, listElementInfo } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
 		
 								const typeMapping: Record<string, string> = {
 									"rdf:List": "list",  // Treat rdf:List as a list
