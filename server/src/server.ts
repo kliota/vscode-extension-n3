@@ -370,7 +370,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 					// If elementCount > 0, it's a fixed list; store the element count
 					if (elementCount > 0) {
 						listElementInfo.push({ elementCount });
-						connection.console.log(`The list is expected to have ${elementCount} elements.`);
 					}
 
 					// Capture owl:unionOf content for both subject and object types
@@ -858,10 +857,21 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											`Expected types were: ${Array.from(expectedTypes).join(", ")}.`
 										);
 									}
+
+									// Check whether the subject list needs to have a predefined number of elements
+									if (listElementInfo[0] !== undefined) {
+										const expectedNumber = listElementInfo[0].elementCount;
+										//connection.console.log(`The subject list needs to have ${expectedNumber} number of elements`);
+										const itemNumber = validItems.length + invalidItems.length;
+										if (itemNumber !== expectedNumber) {
+											connection.console.log(`Error: Subject list's element number does not match with the expected number of elements:\n` + 
+												`\tExpected element number is ${expectedNumber}, current number is ${itemNumber}`);
+										} else {
+											connection.console.log(`Subject list's element number matches with the expected number of elements.`)
+										}
+									}
 								}
-								
-								
-								
+														
 								// Object type matching test
 								let objectTypeMatched = false;
 								for (const fnoType of objectTypes) {
