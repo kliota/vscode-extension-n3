@@ -16446,9 +16446,17 @@ class n3_nodropTermListener extends n3_nodropListener {
         this.listener.onTerm('qvar', name);
     }
 
+    //exitTriples(ctx) {
+        //this.listener.onTriple(ctx);
+	//}
     exitTriples(ctx) {
-        this.listener.onTriple(ctx);
-	}
+        const text = this.text || '';  // Assuming 'this.text' holds the full source text
+        const connection = this.connection || global.console;
+        
+        // Call onTriple with ctx, extracted text, and connection
+        this.listener.onTriple(ctx, text, connection);
+    }
+      
 }
 
 class n3_nodropPrintVisitor extends n3_nodropVisitor {

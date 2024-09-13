@@ -451,6 +451,139 @@ async function generateAndLaunchURL(prefix: string, func: string): Promise<void>
         }
     }
 }
+
+// Function to extract text from context
+function ctx_text(ctx: any, text: string): string {
+    if (!ctx || !ctx.start || !ctx.stop) {
+        console.error("Invalid context.");
+        return '';  
+    }
+    return text.substring(ctx.start.start, ctx.stop.stop + 1);
+}
+
+// Recursive function to calculate the production rule for a term
+function term_prod(ctx: any): any {
+    if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
+        return term_prod(ctx.children[0]);
+    } else {
+        return ctx ? ctx.ruleIndex + 1 : "unknown";
+    }
+}
+
+// Function to infer the type of a value
+function infer_data_type(value: string): string {
+    if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas"; 
+    if (value.match(/^\{.*\}$/s)) return "formula"; 
+    if (value.match(/^\(.*\)$/s)) return "list"; 
+    if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; 
+    if (value.match(/^".*"$/)) return "string"; 
+    if (value.startsWith(":")) return "function"; 
+    if (value.startsWith("?")) return "variable"; 
+    if (value.startsWith("<") && value.endsWith(">")) return "uri"; 
+    return "unknown";
+}
+
+// Function to check for variable type conflicts
+function check_variable_type(variableName: string, newType: string, variableTypes: Record<string, string>, connection: any) {
+    if (variableTypes.hasOwnProperty(variableName)) {
+        const currentType = variableTypes[variableName];
+        connection.console.log(`Checking variable "${variableName}": current type is "${currentType}", new type is "${newType}".`);
+
+        if (currentType !== newType) {
+            connection.console.log(`Error: Type conflict for variable "${variableName}".`);
+            throw new Error(`Type conflict for variable "${variableName}".`);
+        } else {
+            connection.console.log(`Variable "${variableName}" already has type "${currentType}".`);
+        }
+    } else {
+        variableTypes[variableName] = newType;
+        connection.console.log(`Assigned type "${newType}" to variable "${variableName}".`);
+    }
+}
+
+// Function to infer types of list items
+function infer_list_item_types(listValue: string, infer_data_type: (value: string) => string): string[] {
+    const innerValue = listValue.slice(1, -1).trim();
+    const items: string[] = [];
+    let currentItem = "";
+    let depth = 0;
+    let insideQuote = false;
+
+    for (let i = 0; i < innerValue.length; i++) {
+        const char = innerValue[i];
+
+        if (char === '"' && innerValue[i - 1] !== '\\') {
+            insideQuote = !insideQuote;
+            currentItem += char;
+            if (!insideQuote) {
+                items.push(currentItem.trim());
+                currentItem = "";
+            }
+            continue;
+        }
+
+        if (char === '(') depth++;
+        if (char === ')') depth--;
+
+        if (!insideQuote && char === ' ' && depth === 0) {
+            if (currentItem.trim()) {
+                items.push(currentItem.trim());
+            }
+            currentItem = "";
+        } else {
+            currentItem += char;
+        }
+    }
+
+    if (currentItem.trim()) {
+        items.push(currentItem.trim());
+    }
+
+    return items.map(item => infer_data_type(item));
+}
+
+// Function to validate variable types
+async function validate_variable_types(
+    types: string[],
+    expectedTypes: Set<string>,
+    variableTypes: Record<string, string>,
+    connection: any
+): Promise<boolean> {
+    let allTypesValid = true;
+
+    for (const type of types) {
+        if (type === "variable") {
+            const variableName = types.find((item) => item.startsWith("?"));
+            if (variableName) {
+                const expectedTypeForVariable = variableTypes[variableName];
+                if (expectedTypeForVariable) {
+                    if (expectedTypes.has(expectedTypeForVariable)) {
+                        connection.console.log(
+                            `Variable ${variableName} (expected type: ${expectedTypeForVariable}) matches the expected xsd types.`
+                        );
+                    } else {
+                        connection.console.log(
+                            `Variable ${variableName} does not match the expected xsd types.`
+                        );
+                        allTypesValid = false;
+                    }
+                } else {
+                    connection.console.log(`Variable ${variableName} is still unresolved (unknown type).`);
+                    allTypesValid = false;
+                }
+            } else {
+                connection.console.log("No variable name found in types.");
+                allTypesValid = false;
+            }
+        } else if (!expectedTypes.has(type)) {
+            connection.console.log(`Literal type ${type} does not match expected xsd types.`);
+            allTypesValid = false;
+        }
+    }
+
+    return allTypesValid;
+}
+
 // connection.onDidChangeWatchedFiles(_change => {
 // 	// Monitored files have change in VSCode
 // 	connection.console.log('We received an file change event');
@@ -469,6 +602,10 @@ documents.onDidClose((e) => {
 documents.onDidChangeContent((change) => {
 	validateTextDocument(change.document);
 });
+
+// Maintain a history of types assigned to each variable
+const variableTypeHistory: { [variableName: string]: string } = {};
+
 
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 	const docUri = textDocument.uri;
@@ -564,182 +701,75 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			acTokens.add(docUri, type, term);
 		},
 
-		onTriple: function (ctx: any) {
-			let variableTypes: Record<string, string> = {};  // Store variable and expected types
-			
-			function ctx_text(ctx: any) {
-				return text.substring(ctx.start.start, ctx.stop.stop + 1);
-			}
+		onTriple: async function (ctx: any, text: string = '', connection: any = global.console) {
+			let variableTypes: Record<string, string> = {};
+
+			// Fallback to global console if connection or connection.console is undefined
+			const logger = connection && connection.console ? connection.console : global.console;
 		
-			function term_prod(ctx: any): any {
-				if (ctx.children && ctx.children.length > 0 && ctx.children[0].ruleIndex) {
-					return term_prod(ctx.children[0]);
-				} else {
-					return ctx ? ctx.ruleIndex + 1 : "unknown";
-				}
-			}
+			// Debugging log to inspect the connection object
+			logger.log("Connection object:", connection);
 		
-			function infer_data_type(value: string): string {
-				// Recognize different data types
-				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas"; // Recognize lists of formulas
-				if (value.match(/^\{.*\}$/s)) return "formula"; // Recognize individual formulas
-				if (value.match(/^\(.*\)$/s)) return "list"; // Recognize lists, including nested lists
-				if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; // Recognize floats
-				if (value.match(/^".*"$/)) return "string"; // Recognize strings
-				if (value.startsWith(":")) return "function"; // Recognize functions
-				if (value.startsWith("?")) return "variable"; // Recognize variables
-				if (value.startsWith("<") && value.endsWith(">")) return "uri"; // Recognize URIs
-				return "unknown";
-			}
-		
-			// Recursive function to infer types of items in a list, handling nested lists and formulas of any depth
-			function infer_list_item_types(listValue: string): string[] {
-				// Remove outer parentheses
-				const innerValue = listValue.slice(1, -1).trim();
-				const items: string[] = [];
-				let currentItem = "";
-				let depth = 0;
-				let insideQuote = false;
-			
-				// Traverse the innerValue character by character
-				for (let i = 0; i < innerValue.length; i++) {
-					const char = innerValue[i];
-			
-					// Handle quoted strings
-					if (char === '"' && innerValue[i - 1] !== '\\') {
-						insideQuote = !insideQuote;
-						currentItem += char;
-						if (!insideQuote) {
-							items.push(currentItem.trim());
-							currentItem = "";
-						}
-						continue;
-					}
-			
-					// Handle list depth
-					if (char === '(') depth++;
-					if (char === ')') depth--;
-			
-					// If we are not in a nested list or a quote, and hit a space, this is the end of an item
-					if (!insideQuote && char === ' ' && depth === 0) {
-						if (currentItem.trim()) {
-							items.push(currentItem.trim());
-						}
-						currentItem = "";
-					} else {
-						currentItem += char;
-					}
-				}
-			
-				// Push any remaining item
-				if (currentItem.trim()) {
-					items.push(currentItem.trim());
-				}
-			
-				return items.map(item => infer_data_type(item));
-			}					   
-		
-			function validate_variable_types(types: string[], expectedTypes: Set<string>, variableTypes: Record<string, string>): boolean {
-				let allTypesValid = true;
-			
-				for (const type of types) {
-					if (type === "variable") {
-						// Extract variable name from the types list
-						const variableName = types.find(item => item.startsWith("?"));
-			
-						if (variableName) {
-							// Get the expected type for the variable
-							const expectedTypeForVariable = variableTypes[variableName];
-			
-							if (expectedTypeForVariable) {
-								// Check if the expected type for the variable matches any of the expected types
-								if (expectedTypes.has(expectedTypeForVariable)) {
-									connection.console.log(`Variable ${variableName} (expected type: ${expectedTypeForVariable}) matches the expected xsd types.`);
-								} else {
-									connection.console.log(`Variable ${variableName} (expected type: ${expectedTypeForVariable}) does not match the expected xsd types: ${Array.from(expectedTypes).join(", ")}.`);
-									allTypesValid = false;
-								}
-							} else {
-								// Variable type is still unknown, defer the validation
-								connection.console.log(`Variable ${variableName} is still unresolved (unknown type).`);
-								allTypesValid = false; // Variable is not valid if its type is unknown
-							}
-						} else {
-							// No variable name was found in the types array
-							connection.console.log("No variable name found in types.");
-							allTypesValid = false;
-						}
-					} else if (!expectedTypes.has(type)) {
-						// Literal type does not match any of the expected types
-						connection.console.log(`Literal type ${type} does not match expected xsd types: ${Array.from(expectedTypes).join(", ")}.`);
-						allTypesValid = false;
-					}
-				}
-			
-				return allTypesValid;
-			}
-												
-		
-			// Ensure that ctx and its children are defined
+			// Check if ctx and text are valid
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
-				connection.console.log("Invalid context or missing elements in triple.");
+				logger.log("Invalid context or missing elements in triple.");
 				return;
 			}
 		
 			const subject: any = ctx.children[0];
 			const predicateObjectList: any = ctx.children[1];
 		
-			// Check if predicateObjectList has the required children
 			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
-				connection.console.log("Invalid predicate-object list in triple.");
+				logger.log("Invalid predicate-object list in triple.");
 				return;
 			}
 		
 			const verb = predicateObjectList.children[0];
 			const objectList = predicateObjectList.children[1];
 		
-			// Check if objectList has at least one child
 			if (!objectList.children || objectList.children.length === 0) {
-				connection.console.log("Invalid object list in triple.");
+				logger.log("Invalid object list in triple.");
 				return;
 			}
 		
 			const object = objectList.children[0];
 		
-			const subjectText = ctx_text(subject);
+			// Validate the text input before using it
+			if (!text) {
+				logger.log("Invalid 'text' input: 'text' is undefined or null.");
+				return;
+			}
+		
+			const subjectText = ctx_text(subject, text);
 			const subjectType = infer_data_type(subjectText);
 		
-			const objectText = ctx_text(object);
+			const objectText = ctx_text(object, text);
 			const objectType = infer_data_type(objectText);
-			
-			// Construct the output string, ensuring the expected type is included
+		
 			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType}\n` +
-				`verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
-				`object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${objectType})`;
+				`verb (first): ${ctx_text(verb, text)} (rule: ${term_prod(verb)})\n` +
+				`object (first): ${ctx_text(object, text)} (rule: ${term_prod(object)}, type: ${objectType})`;
 		
 			let subjectListItemTypes: string[] = [];
-			let objectListItemTypes: string[] = [];  // Separate array for object list item types
+			let objectListItemTypes: string[] = [];
 		
-			// Check and infer subject list item types
 			if (subjectType === "list" || subjectType === "listOfFormulas") {
-				subjectListItemTypes = infer_list_item_types(subjectText);
+				subjectListItemTypes = infer_list_item_types(subjectText, infer_data_type);
 				output += `\nSubject list item types: ${subjectListItemTypes.join(", ")}`;
 			}
 		
-			// Check and infer object list item types
 			if (objectType === "list" || objectType === "listOfFormulas") {
-				objectListItemTypes = infer_list_item_types(objectText);
+				objectListItemTypes = infer_list_item_types(objectText, infer_data_type);
 				output += `\nObject list item types: ${objectListItemTypes.join(", ")}`;
 			}
-				
-			connection.console.log(output);
 		
-			const verbText = ctx_text(verb);
-			// Handle special cases for '=>' and '<='
+			// Safely log output
+			logger.log(output);
+		
+			const verbText = ctx_text(verb, text);
 			if (verbText === '=>' || verbText === '<=') {
 				const correspondingFunction = verbText === '=>' ? 'log:implies' : 'log:impliedBy';
 				connection.console.log(`The verb "${verbText}" is recognized as a shorthand for "${correspondingFunction}".`);
-				// Handle the logic as needed for these cases, no need for prefix validation
 			} else if (!verbText.includes(':')) {
 				connection.console.log("Invalid verb format; missing prefix and function.");
 				return;
@@ -748,261 +778,289 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			const [prefix, func] = verbText.split(':');
 		
 			if (subjectText && verbText && objectText) {
-				checkFunctionInPrefix(prefix, func).then(functionExists => {
-					if (functionExists) {
-						connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
+				const functionExists = await checkFunctionInPrefix(prefix, func);
+				if (functionExists) {
+					connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
 		
-						generateAndLaunchURL(prefix, func).then(async () => {
-							if (!hasSyntaxError) {  // Only compare types if no syntax error occurred
-								const { fnoTypes, xsdValues, subjectTypes, objectTypes, listElementInfo } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
+					await generateAndLaunchURL(prefix, func);
 		
-								const typeMapping: Record<string, string> = {
-									"rdf:List": "list",  // Treat rdf:List as a list
-									"xsd:float": "float",
-									"xsd:string": "string",
-									"rdf:Function": "function",
-									"log:Formula": "listOfFormulas",  // Maps log:Formula to listOfFormulas
-									"xsd:double": "double",
-									"log:Uri": "uri"  // URI mapping
-								};
+					const hasSyntaxError = false;  // Example placeholder
+					if (!hasSyntaxError) {
+						const { xsdValues, subjectTypes, objectTypes, listElementInfo } = await fetchAndExtractParameters(
+							`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`
+						);
 		
-								// If subject or object is a variable, store the expected type from fno:type (xsdValues)
-								if (subjectType === "variable") {
-									const expectedTypeForSubject = xsdValues.length > 0 ? xsdValues[0] : null;
-									if (expectedTypeForSubject) {
-										variableTypes[subjectText] = typeMapping[expectedTypeForSubject] || expectedTypeForSubject;
-										connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
-									}
-								}
-								
-								if (objectType === "variable") {
-									const expectedTypeForObject = xsdValues.length > 1 ? xsdValues[1] : xsdValues[0];
-									if (expectedTypeForObject) {
-										variableTypes[objectText] = typeMapping[expectedTypeForObject] || expectedTypeForObject;
-										connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
-									}
-								}
+						const typeMapping: Record<string, string> = {
+							"rdf:List": "list",
+							"xsd:float": "float",
+							"xsd:string": "string",
+							"rdf:Function": "function",
+							"log:Formula": "listOfFormulas",
+							"xsd:double": "double",
+							"log:Uri": "uri"
+						};
 		
-								// Prepare the set of expected types
-								const expectedTypes = new Set<string>(xsdValues.map(type => typeMapping[type] || type));
-								
-								// Subject type matching test
-								let subjectTypeMatched = false;
-								for (const fnoType of subjectTypes) {
-									if (subjectType === "variable" || 
-										typeMapping[fnoType] === subjectType || 
-										(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
-										(fnoType === "log:Formula" && subjectType === "list")) {
-										connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
-										subjectTypeMatched = true;
-										break;
-									}
-								}
-								
-								if (!subjectTypeMatched) {
-									for (const fnoType of subjectTypes) {
-										connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
-									}
-								}
-								
-								// Check if the subject is a list, then validate each item type
-								if (subjectType === "list" || subjectType === "listOfFormulas") {
-									const listItems = infer_list_item_types(subjectText);
-									const variableNames = (subjectText.match(/\?[^\s()]+/g) || []); // Match variables starting with '?' but exclude parentheses
-									
-									// Process list items and assign expected types
-									variableNames.forEach(variableName => {
-										const expectedTypeForVariable = xsdValues.length > 0 ? xsdValues[0] : null;
-										if (expectedTypeForVariable) {
-											variableTypes[variableName] = typeMapping[expectedTypeForVariable] || expectedTypeForVariable;
-											connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
-										}
-									});
-								
-									// Validate types for the list items
-									const itemValidationResults = listItems.map(item => {
-										let expectedType;
-										if (item === "variable") {
-											// Use precomputed variable names
-											expectedType = variableNames.map(name => variableTypes[name] || "unknown").find(type => type !== "unknown");
-										} else {
-											expectedType = undefined;
-										}
-								
-										const isValid = item === "variable"
-											? expectedType && expectedTypes.has(expectedType) // Check if the variable's expected type is valid
-											: expectedTypes.has(item); // For non-variable items, check directly against expected types
-								
-										return {
-											type: item,
-											expectedType,
-											isValid
-										};
-									});
-								
-									const validItems = itemValidationResults.filter(result => result.isValid);
-									const invalidItems = itemValidationResults.filter(result => !result.isValid);
-								
-									if (validItems.length > 0) {
-										connection.console.log(
-											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`include valid xsd:type values (${Array.from(expectedTypes).join(", ")}). Valid items: ${validItems.map(item => item.type).join(", ")}.`
-										);
-									}
-								
-									if (invalidItems.length > 0) {
-										connection.console.log(
-											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`do not match the expected xsd:type values (${Array.from(expectedTypes).join(", ")}). Invalid items: ${invalidItems.map(item => `${item.type} (expected: ${item.expectedType || "undefined"})`).join(", ")}. ` +
-											`Expected types were: ${Array.from(expectedTypes).join(", ")}.`
-										);
-									}
-
-									// Check whether the subject list needs to have a predefined number of elements
-									if (listElementInfo[0] !== undefined) {
-										const expectedNumber = listElementInfo[0].elementCount;
-										//connection.console.log(`The subject list needs to have ${expectedNumber} number of elements`);
-										const itemNumber = validItems.length + invalidItems.length;
-										if (itemNumber !== expectedNumber) {
-											connection.console.log(`Error: Subject list's element number does not match with the expected number of elements:\n` + 
-												`\tExpected element number is ${expectedNumber}, current number is ${itemNumber}`);
-										} else {
-											connection.console.log(`Subject list's element number matches with the expected number of elements.`)
-										}
-									}
-								}
-														
-								// Object type matching test
-								let objectTypeMatched = false;
-								for (const fnoType of objectTypes) {
-									if (objectType === "variable" || 
-										typeMapping[fnoType] === objectType || 
-										(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
-										(fnoType === "log:Formula" && objectType === "list")) {
-										connection.console.log(`The object data type ${objectType}-${fnoType} and fno:type "${fnoType}" match.`);
-										objectTypeMatched = true;
-										break;
-									}
-								}
-								
-								if (!objectTypeMatched) {
-									for (const fnoType of objectTypes) {
-										connection.console.log(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
-									}
-								}
-								
-								// Check if the object is a list, then validate each item type
-								if (objectType === "list" || objectType === "listOfFormulas") {
-									const expectedType = objectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
-
-									if (expectedType) {
-										const isValidObject = objectListItemTypes.every(type => type === "formula" || type === "variable");
-								
-										if (isValidObject) {
-											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`are valid for the expected type log:Formula.`
-											);
-										} else {
-											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`are not valid for the expected type log:Formula.`
-											);
-										}
-									} else if (xsdValues.length > 0) {
-										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-								
-										// Determine the expected fno datatype for variables
-										const expectedFnoVariableTypes = new Set<string>(
-											Object.keys(typeMapping).filter(key => typeMapping[key] === "variable")
-										);
-								
-										// Process list items and assign expected types
-										objectListItemTypes.forEach(type => {
-											if (type === "variable") {
-												// Extract variable names from the list item
-												const variableNames = objectText.match(/\?[^\s]+/g) || [];
-												
-												// Iterate over all found variable names
-												variableNames.forEach(variableName => {
-													const expectedTypeForVariable = xsdValues.length > 0 ? xsdValues[0] : null;
-													if (expectedTypeForVariable) {
-														variableTypes[variableName] = typeMapping[expectedTypeForVariable] || expectedTypeForVariable;
-														connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
-													}
-												});
-											}
-										});
-								
-										// Validate types for the list items
-										const itemValidationResults = objectListItemTypes.map(type => {
-											let expectedType;
-											if (type === "variable") {
-												// Extract variable names from the list item
-												const variableNames = objectText.match(/\?[^\s]+/g) || [];
-												
-												// Iterate over all found variable names
-												variableNames.forEach(variableName => {
-													expectedType = variableTypes[variableName] || "unknown"; // Default to "unknown" if not found
-													//connection.console.log(`Debug: Variable "${variableName}" in list has an expected type of "${expectedType}".`);
-												});
-											} else {
-												expectedType = undefined;
-											}
-								
-											const isValid = type === "variable"
-												? expectedType && xsdTypeSet.has(expectedType) // Check if the variable's expected type is valid
-												: xsdTypeSet.has(type); // For non-variable items, check directly against expected types
-								
-											return {
-												type,
-												expectedType,
-												isValid
-											};
-										});
-								
-										const validItems = itemValidationResults.filter(result => result.isValid);
-										const invalidItems = itemValidationResults.filter(result => !result.isValid);
-								
-										if (validItems.length > 0) {
-											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`include valid xsd:type values (${Array.from(xsdTypeSet).join(", ")}). Valid items: ${validItems.map(item => item.type).join(", ")}.`
-											);
-										}
-								
-										if (invalidItems.length > 0) {
-											// Check for invalid variable types and log details
-											const invalidVariableTypes = invalidItems
-												.filter(item => item.type === "variable")
-												.map(item => item.type);
-								
-											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`do not match the expected xsd:type values (${Array.from(xsdTypeSet).join(", ")}). Invalid items: ${invalidItems.map(item => item.type).join(", ")}.`
-											);
-								
-											if (invalidVariableTypes.length > 0) {
-												connection.console.log(
-													`The invalid variable items are compared against the expected fno variable types: ${Array.from(expectedFnoVariableTypes).join(", ")}.`
-												);
-											}
-										}
-									}
-								}                                
-							} 
-							else {
-								connection.console.log("Skipping type comparison due to syntax error.");
+						if (subjectType === "variable") {
+							const expectedTypeForSubject = xsdValues.length > 0 ? xsdValues[0] : null;
+							if (expectedTypeForSubject) {
+								variableTypes[subjectText] = typeMapping[expectedTypeForSubject] || expectedTypeForSubject;
+								connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
 							}
-						});
+						}
+		
+						if (objectType === "variable") {
+							const expectedTypeForObject = xsdValues.length > 1 ? xsdValues[1] : xsdValues[0];
+							if (expectedTypeForObject) {
+								variableTypes[objectText] = typeMapping[expectedTypeForObject] || expectedTypeForObject;
+								connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
+							}
+						}
+		
+						// Prepare the set of expected types
+						const expectedTypes = new Set<string>(xsdValues.map(type => typeMapping[type] || type));
+		
+						// Subject type matching test
+						let subjectTypeMatched = false;
+						for (const fnoType of subjectTypes) {
+							if (subjectType === "variable" ||
+								typeMapping[fnoType] === subjectType ||
+								(fnoType === "rdf:List" && subjectType === "listOfFormulas") ||
+								(fnoType === "log:Formula" && subjectType === "list")) {
+								connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
+								subjectTypeMatched = true;
+								break;
+							}
+						}
+		
+						if (!subjectTypeMatched) {
+							for (const fnoType of subjectTypes) {
+								connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
+							}
+						}
+		
+						// Check if the subject is a list, then validate each item type
+						if (subjectType === "list" || subjectType === "listOfFormulas") {
+							const listItems = infer_list_item_types(subjectText, infer_data_type); // Ensure infer_data_type is passed
+							const variableNames = (subjectText.match(/\?[^\s()]+/g) || []); // Match variables starting with '?' but exclude parentheses
+		
+							// Process list items and assign expected types
+							variableNames.forEach(variableName => {
+								const expectedTypeForVariable = xsdValues.length > 0 ? xsdValues[0] : null;
+								if (expectedTypeForVariable) {
+									variableTypes[variableName] = typeMapping[expectedTypeForVariable] || expectedTypeForVariable;
+									connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
+								}
+							});
+		
+							// Validate types for the list items
+							const itemValidationResults = listItems.map(item => {
+								let expectedType;
+		
+								if (item === "variable") {
+									// Extract variable names from the list item
+									const variableNamesInSubject = (subjectText.match(/\?[^\s()]+/g) || []) as string[];
+									const variableNamesInObject = (objectText.match(/\?[^\s()]+/g) || []) as string[];
+
+		
+									// Concatenate variable names from both subject and object
+									const variableNamesInItem = variableNamesInSubject.concat(variableNamesInObject);
+		
+									// Determine the expected type for the variable
+									expectedType = variableNamesInItem.map(name => variableTypes[name] || "unknown").find(type => type !== "unknown");
+		
+									// Debug output for the variable's expected type
+									connection.console.log(`Debug: Variable names in item "${item}": ${variableNamesInItem}`);
+									connection.console.log(`Debug: Expected type for variable "${item}": ${expectedType}`);
+								} else {
+									expectedType = undefined; // Non-variable items don't need an expected type
+								}
+		
+								// Validate the item type
+								const isValid = item === "variable"
+									? expectedType && expectedTypes.has(expectedType) // Check if the variable's expected type is valid
+									: expectedTypes.has(item); // For non-variable items, check directly against expected types
+		
+								return {
+									type: item,
+									expectedType,
+									isValid
+								};
+							});
+		
+							// Log validation results
+							const validItems = itemValidationResults.filter(result => result.isValid);
+							const invalidItems = itemValidationResults.filter(result => !result.isValid);
+		
+							if (validItems.length > 0) {
+								connection.console.log(
+									`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
+									`include valid xsd:type values (${Array.from(expectedTypes).join(", ")}). Valid items: ${validItems.map(item => item.type).join(", ")}.`
+								);
+							}
+		
+							if (invalidItems.length > 0) {
+								connection.console.log(
+									`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
+									`do not match the expected xsd:type values (${Array.from(expectedTypes).join(", ")}). Invalid items: ${invalidItems.map(item => `${item.type} (expected: ${item.expectedType || "undefined"})`).join(", ")}. ` +
+									`Expected types were: ${Array.from(expectedTypes).join(", ")}.`
+								);
+							}
+		
+							// Check whether the subject list needs to have a predefined number of elements
+							if (listElementInfo[0] !== undefined) {
+								const expectedNumber = listElementInfo[0].elementCount;
+								const itemNumber = validItems.length + invalidItems.length;
+		
+								if (itemNumber !== expectedNumber) {
+									connection.console.log(`Error: Subject list's element number does not match the expected number of elements.\n` +
+										`Expected: ${expectedNumber}, current: ${itemNumber}`);
+								} else {
+									connection.console.log(`Subject list's element number matches the expected number of elements.`);
+								}
+							}
+						}
+		
+						// Object type matching test
+						let objectTypeMatched = false;
+						for (const fnoType of objectTypes) {
+							if (objectType === "variable" ||
+								typeMapping[fnoType] === objectType ||
+								(fnoType === "rdf:List" && objectType === "listOfFormulas") ||
+								(fnoType === "log:Formula" && objectType === "list")) {
+								connection.console.log(`The object data type ${objectType}-${fnoType} and fno:type "${fnoType}" match.`);
+								objectTypeMatched = true;
+								break;
+							}
+						}
+		
+						if (!objectTypeMatched) {
+							for (const fnoType of objectTypes) {
+								connection.console.log(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
+							}
+						}
+		
+						// Check if the object is a list, then validate each item type
+						if (objectType === "list" || objectType === "listOfFormulas") {
+							const expectedType = objectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
+		
+							if (expectedType) {
+								const isValidObject = objectListItemTypes.every(type => type === "formula" || type === "variable");
+		
+								if (isValidObject) {
+									connection.console.log(
+										`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
+										`are valid for the expected type log:Formula.`
+									);
+								} else {
+									connection.console.log(
+										`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
+										`are not valid for the expected type log:Formula.`
+									);
+								}
+							} else if (xsdValues.length > 0) {
+								const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
+		
+								// Determine the expected fno datatype for variables
+								const expectedFnoVariableTypes = new Set<string>(
+									Object.keys(typeMapping).filter(key => typeMapping[key] === "variable")
+								);
+		
+								// Process list items and assign expected types
+								objectListItemTypes.forEach(type => {
+									if (type === "variable") {
+										// Extract variable names from the list item
+										const variableNames = objectText.match(/\?[^\s]+/g) || [];
+		
+										variableNames.forEach(variableName => {
+											const expectedTypeForVariable = xsdValues.length > 0 ? xsdValues[0] : null;
+											if (expectedTypeForVariable) {
+												variableTypes[variableName] = typeMapping[expectedTypeForVariable] || expectedTypeForVariable;
+												connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
+											}
+										});
+									}
+								});
+		
+								// Validate types for the list items
+								const itemValidationResults = objectListItemTypes.map(type => {
+									let expectedType;
+									if (type === "variable") {
+										// Extract variable names from the list item
+										const variableNames = objectText.match(/\?[^\s]+/g) || [];
+		
+										variableNames.forEach(variableName => {
+											expectedType = variableTypes[variableName] || "unknown"; // Default to "unknown" if not found
+										});
+									} else {
+										expectedType = undefined;
+									}
+		
+									const isValid = type === "variable"
+										? expectedType && xsdTypeSet.has(expectedType) // Check if the variable's expected type is valid
+										: xsdTypeSet.has(type); // For non-variable items, check directly against expected types
+		
+									return {
+										type,
+										expectedType,
+										isValid
+									};
+								});
+		
+								const validItems = itemValidationResults.filter(result => result.isValid);
+								const invalidItems = itemValidationResults.filter(result => !result.isValid);
+		
+								if (validItems.length > 0) {
+									connection.console.log(
+										`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
+										`include valid xsd:type values (${Array.from(xsdTypeSet).join(", ")}). Valid items: ${validItems.map(item => item.type).join(", ")}.`
+									);
+								}
+		
+								if (invalidItems.length > 0) {
+									const invalidVariableTypes = invalidItems
+										.filter(item => item.type === "variable")
+										.map(item => item.type);
+		
+									connection.console.log(
+										`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
+										`do not match the expected xsd:type values (${Array.from(xsdTypeSet).join(", ")}). Invalid items: ${invalidItems.map(item => item.type).join(", ")}.`
+									);
+		
+									if (invalidVariableTypes.length > 0) {
+										connection.console.log(
+											`The invalid variable items are compared against the expected fno variable types: ${Array.from(expectedFnoVariableTypes).join(", ")}.`
+										);
+									}
+								}
+							}
+						}
+		
+						// Check subject variable type
+						if (subjectType === "variable") {
+							const expectedTypeForSubject = xsdValues.length > 0 ? xsdValues[0] : null;
+							if (expectedTypeForSubject) {
+								check_variable_type(subjectText, typeMapping[expectedTypeForSubject] || expectedTypeForSubject, variableTypes, connection);
+							}
+						}
+		
+						// Check object variable type
+						if (objectType === "variable") {
+							const expectedTypeForObject = xsdValues.length > 1 ? xsdValues[1] : xsdValues[0];
+							if (expectedTypeForObject) {
+								check_variable_type(objectText, typeMapping[expectedTypeForObject] || expectedTypeForObject, variableTypes, connection);
+							}
+						}
 					} else {
-						connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+						connection.console.log("Skipping type comparison due to syntax error.");
 					}
-				});
+				} else {
+					connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+				}
 			} else {
 				connection.console.log("The input is not a valid triple.");
 			}
-		},		
+		},
+				
 						
 
 		onPrefix: function (prefix: string, uri: string) {
