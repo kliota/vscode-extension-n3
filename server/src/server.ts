@@ -286,12 +286,12 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
 }
 
 
-async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[], listElementInfo: { elementCount?: number }[] }> {
+async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[], listElementInfo: { elementCount?: number , subjectListElementTypes?: string, objectListElementTypes?: string}[] }> {
     const xsdValues: Set<string> = new Set();
     const fnoTypes: Set<string> = new Set();
 	const subjectTypes: Set<string> = new Set();
     const objectTypes: Set<string> = new Set();
-	const listElementInfo: { elementCount?: number }[] = [];
+	const listElementInfo: { elementCount?: number , subjectListElementTypes?: string, objectListElementTypes?: string}[] = [];
 
     try {
         const response = await axios.get(url);
@@ -372,6 +372,52 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 						listElementInfo.push({ elementCount });
 					}
 
+					// Collect types of list elements for both Subject and Object
+					// Regular expressions for different types of lists
+					const monotypeListElementTypeRegex = /fnon:listElementType\s*\[\s*([\s\S]*?)fno:type\s*([\s\S]*)\s*\]\s*\]/g;
+					const subjectMultitypeListElementTypeRegex = /\$s([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)([\s\S]*?)\$o/g;
+					const objectMultitypeListElementTypeRegex = /\$o([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
+					const typeCaptureRegex = /fno:type\s*([\w:]+)/g;
+
+					let match;
+					
+					const subjectListElementTypes = [];
+					const objectListElementTypes = [];
+
+					// For monotype subject lists which are indicated by s.i
+					while ((match = monotypeListElementTypeRegex.exec(parameterBlock)) !== null) {
+						subjectListElementTypes.push(match[2]);
+					}
+
+					// For multitype subject lists such as s.1, s.2 etc.
+					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
+						const listBlock = match[2]; // the full content of `fnon:listElements`
+						
+						// Find all `fno:type` inside this block
+						let typeMatch;
+						while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
+							subjectListElementTypes.push(typeMatch[1]); // the value of `fno:type`
+						}
+					}
+
+					// For multitype object lists such as o.1, o.2 etc.
+					while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
+						const listBlock = match[2]; 
+						
+						let typeMatch;
+						while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
+							objectListElementTypes.push(typeMatch[1]);
+						}
+					}
+
+					if (subjectListElementTypes.length > 0) {
+						connection.console.log(`Required subject list element types are ${Array.from(subjectListElementTypes).join(", ")} .`);
+					}
+
+					if (objectListElementTypes.length > 0) {
+						connection.console.log(`Required object list element types are ${Array.from(objectListElementTypes).join(", ")} .`);
+					}
+					
 					// Capture owl:unionOf content for both subject and object types
 					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
 					const unionOfMatch = unionOfRegex.exec(parameterBlock);
@@ -713,7 +759,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			const objectType = infer_data_type(objectText);
 			
 			// Construct the output string, ensuring the expected type is included
-			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType}\n` +
+			let output = `subject: ${subjectText} (rule: ${term_prod(subject)}, type: ${subjectType})\n` +
 				`verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
 				`object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${objectType})`;
 		
