@@ -293,40 +293,6 @@ type N3Type =
 	| {kind: 'triple'; subject: N3Type | null; predicate: string | null; object: N3Type | null}
 	| null
 
-function print_node(rdf_graph:any, node:any, depth: integer) {
-	let intent = "";
-
-	for (let i = 0; i<depth; i++){
-		intent += "\t";
-	}
-	if ($rdf.isLiteral(node)) {
-		connection.console.log(`${intent}Literal: ${node.value.replace('\n','').substring(0, 10)}`);
-		return;
-	}
-	connection.console.log(`${intent}Node: ${node}`);
-	rdf_graph.statementsMatching(node).forEach((child:any) => {
-		const predicate = child.predicate;
-		const object = child.object;
-		connection.console.log(`${intent}|`);
-		connection.console.log(`${intent}|- ${predicate.value} ->`);
-		switch(object.termType) {
-			case "NamedNode":
-			case "Literal":
-				print_node(rdf_graph, object, depth+1);
-				break;
-			case "Collection":
-				object.elements.forEach((child:any) => {
-					print_node(rdf_graph, child, depth+5);
-				});
-				break;				
-			default:
-				connection.console.log(`${intent}Unkown term type ${object.termType} and value ${object.value}`);
-				break;
-		}		
-	}
-	);
-}
-
 const fno_subject_str = "https://w3id.org/function/ontology/n3#subject" as const;
 const fno_object_str = "https://w3id.org/function/ontology/n3#object" as const;
 const fno_position_str = "https://w3id.org/function/ontology/n3#position" as const;
