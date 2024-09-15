@@ -426,6 +426,25 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                         listInfo.objectListElementTypes = objectListElementTypes;
                     }
 
+					// Capture owl:unionOf content for both subject and object types
+					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
+					const unionOfMatch = unionOfRegex.exec(parameterBlock);
+					if (unionOfMatch) {
+						const unionOfContent = unionOfMatch[1];
+
+						// Extract XSD types from unionOf for subject or object
+						const unionOfXsdRegex = /xsd:[\w-]+/g;
+						let unionOfXsdMatch;
+						while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
+							xsdValues.add(unionOfXsdMatch[0]);
+
+							if (isSubject) {
+								subjectTypes.add(unionOfXsdMatch[0]);
+							} else if (isObject) {
+								objectTypes.add(unionOfXsdMatch[0]);
+							}
+						}
+					}
                     // Only push if we have some information about subject or object
                     if (listInfo.subjectElementCount || listInfo.objectElementCount || listInfo.subjectListElementTypes || listInfo.objectListElementTypes) {
                         listElementInfo.push(listInfo);
@@ -840,40 +859,48 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								}
 								
 								// Check if the subject is a list, then validate each item type
+
 								if (subjectType === "list" || subjectType === "listOfFormulas") {
 									const listItems = infer_list_item_types(subjectText);
-									
-									// For subject, all list items are undefined
-									const subjectExpectedTypes = listItems.map(() => "undefined");  // All types are undefined
-									
-									// Check the position of each variable and assign expected types
-									const variableNames = (subjectText.match(/\?[^\s()]+/g) || []); // Match variables starting with '?' but exclude parentheses
 								
-									// Process list items and assign expected types for variables (all undefined in subject list)
+									// Initialize subjectExpectedTypes based on the number of list items
+									const subjectExpectedTypes = listItems.map(() => "undefined");
+								
+									// Dynamically extract expected types from listElementInfo for subject
+									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
+										// Assign xsd types from the parsed metadata
+										if (expectedType.includes('xsd')) {
+											subjectExpectedTypes[index] = expectedType;
+										} else {
+											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
+										}
+									});
+								
+									// Extract variable names from the subject text
+									const variableNames = (subjectText.match(/\?[^\s()]+/g) || []).map(name => name.trim());
+								
+									// Process list items and assign expected types for variables
 									variableNames.forEach((variableName, index) => {
-										// Assign undefined as the expected type for variables in the subject list
-										variableTypes[variableName] = "undefined";
-										connection.console.log(`The variable "${variableName}" in list has an expected type of "undefined".`);
+										// Check if the expected type for this variable is in subjectExpectedTypes
+										if (subjectExpectedTypes[index] && subjectExpectedTypes[index] !== "undefined") {
+											variableTypes[variableName] = subjectExpectedTypes[index];  // Assign the expected type to the variable
+										}
+										
+										connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
 									});
 								
 									// Validate variable types for the list items
 									const itemValidationResults = listItems.map((item, index) => {
-										let expectedType;
+										let expectedType = subjectExpectedTypes[index] || "undefined";
+								
 										if (item === "variable") {
-											// Use the type determined above for the variable (which is "undefined")
 											expectedType = variableTypes[variableNames[index]] || "undefined";
-										} else {
-											expectedType = "undefined";  // All list items in the subject are undefined
 										}
 								
 										// If expected types are undefined or "any type", it should be considered valid
-										const isValid = expectedType === "undefined" || expectedType === "any type";
+										const isValid = expectedType === "undefined" || expectedType === "any type" || expectedType === item;
 								
-										return {
-											type: item,
-											expectedType,
-											isValid
-										};
+										return { type: item, expectedType, isValid };
 									});
 								
 									const validItems = itemValidationResults.filter(result => result.isValid);
@@ -887,10 +914,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									}
 								
 									if (invalidItems.length > 0) {
-										const invalidItemMessages = invalidItems.map(item => {
-											return `${item.type} (expected: ${item.expectedType})`;
-										});
-								
+										const invalidItemMessages = invalidItems.map(item => `${item.type} (expected: ${item.expectedType})`);
 										connection.console.log(
 											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
 											`do not match the expected xsd:type values. Invalid items: ${invalidItemMessages.join(", ")}.`
@@ -904,15 +928,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										const expectedSubjectNumber = listElementInfo[0].subjectElementCount;
 										const subjectItemNumber = validItems.length + invalidItems.length;
 										if (subjectItemNumber !== expectedSubjectNumber) {
-											connection.console.log(`Error: Subject list's element number does not match with the expected number of elements:\n` +
-												`\tExpected element number is ${expectedSubjectNumber}, current number is ${subjectItemNumber}`);
+											connection.console.log(
+												`Error: Subject list's element number does not match with the expected number of elements:\n` +
+												`\tExpected element number is ${expectedSubjectNumber}, current number is ${subjectItemNumber}`
+											);
 										} else {
 											connection.console.log(`Subject list's element number matches with the expected number of elements.`);
 										}
 									}
-								}
-								
-														
+								}								
+																						
 								// Object type matching test
 								let objectTypeMatched = false;
 								for (const fnoType of objectTypes) {
