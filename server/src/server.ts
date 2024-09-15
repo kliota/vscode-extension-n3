@@ -31,6 +31,7 @@ const n3 = require("./parser/n3Main_nodrop.js");
 import { DocTokens } from "./ac/DocTokens.js";
 import axios, { AxiosError } from 'axios';
 
+const $rdf = require('rdflib');
 
 // import * as should from 'should';
 // import { spawnSync } from "child_process";
@@ -285,6 +286,158 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
     return false;
 }
 
+type N3Type = 
+	| {kind: 'list' | 'formula'; list: N3Type[] | null}
+	| {kind: 'float' | 'double' | 'decimal' | 'integer'; num: number | null}
+	| {kind: 'string' | 'uri' | 'function'; str: string | null}
+	| {kind: 'triple'; subject: N3Type | null; predicate: string | null; object: N3Type | null}
+	| null
+
+function print_node(rdf_graph:any, node:any, depth: integer) {
+	let intent = "";
+
+	for (let i = 0; i<depth; i++){
+		intent += "\t";
+	}
+	if ($rdf.isLiteral(node)) {
+		connection.console.log(`${intent}Literal: ${node.value.replace('\n','').substring(0, 10)}`);
+		return;
+	}
+	connection.console.log(`${intent}Node: ${node}`);
+	rdf_graph.statementsMatching(node).forEach((child:any) => {
+		const predicate = child.predicate;
+		const object = child.object;
+		connection.console.log(`${intent}|`);
+		connection.console.log(`${intent}|- ${predicate.value} ->`);
+		switch(object.termType) {
+			case "NamedNode":
+			case "Literal":
+				print_node(rdf_graph, object, depth+1);
+				break;
+			case "Collection":
+				object.elements.forEach((child:any) => {
+					print_node(rdf_graph, child, depth+5);
+				});
+				break;				
+			default:
+				connection.console.log(`${intent}Unkown term type ${object.termType} and value ${object.value}`);
+				break;
+		}		
+	}
+	);
+}
+
+const fno_subject_str = "https://w3id.org/function/ontology/n3#subject" as const;
+const fno_object_str = "https://w3id.org/function/ontology/n3#object" as const;
+const fno_position_str = "https://w3id.org/function/ontology/n3#position" as const;
+const fno_parameter_str = "https://w3id.org/function/ontology#parameter" as const;
+const fno_type_str = "https://w3id.org/function/ontology#type" as const;
+const fno_list_elements_str = "https://w3id.org/function/ontology/n3#listElements" as const;
+
+const rdf_list_str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#List" as const;
+const xsd_integer_str = "http://www.w3.org/2001/XMLSchema#integer" as const;
+
+function check_position(rdf_graph:any, parameter: any, is: typeof fno_subject_str | typeof fno_object_str): boolean {
+	return rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_position_str))[0].object.value == is;
+}
+
+function extract_types(rdf_graph:any, parameter: any): N3Type {
+	let ret_n3: N3Type= null;
+	const temp_type = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_type_str));
+	if (temp_type.length == 0) {
+		return ret_n3;
+	}
+	switch (rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_type_str))[0].object.value){
+		case rdf_list_str:
+			const list_item_types = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_elements_str));
+			if(list_item_types.length == 0){
+				ret_n3={kind:"list", list:null};
+			} else {
+				const temp_list = list_item_types[0].object;
+				const the_list: N3Type[] = [];
+				temp_list.elements.forEach((item:any) =>{
+					const item_n3 = extract_types(rdf_graph, item);
+					the_list.push(item_n3);
+				});
+				ret_n3={kind:"list", list:the_list};
+			}	
+			break;
+		case xsd_integer_str:
+			ret_n3 = {kind: "integer", num:null};
+			break;
+	}
+	return ret_n3;
+}
+
+function N3Type_to_str(to_print: N3Type) : string {
+	let ret = "";
+	if(!to_print)
+		return "any";
+	switch (to_print.kind) {
+		case "list":
+			ret = "List( ";
+			if (to_print.list != null) {
+				to_print.list.forEach(element => {
+					ret+=N3Type_to_str(element)+" ";
+				});
+			}
+			ret += ")";
+			break;
+		case "formula":
+			ret = "Formula{ ";
+			if (to_print.list != null) {
+				to_print.list.forEach(element => {
+					ret+=N3Type_to_str(element)+" ";
+				});
+			}
+			ret += "}";
+			break;
+		case "integer":
+		case "decimal":
+		case "uri":
+		case "string":
+		case "float":
+		case "double":
+		case "function":
+			ret = to_print.kind;
+			break;
+		case "triple":
+			ret = "<" + N3Type_to_str(to_print.subject) + " function " + N3Type_to_str(to_print.object) + ">";
+			break;
+		default:
+			connection.console.warn(`Unknown type`);
+			break;
+	}
+	return ret;
+}
+
+function TreeFetchAndExtract(rdfData:any):N3Type {
+	const ret :N3Type = {kind:"triple", subject:null, predicate:null, object:null};
+
+	const store = $rdf.graph();
+	const base = "http://example.org/";
+	$rdf.parse(rdfData, store, base, 'text/turtle');
+	store.statementsMatching().forEach((quad: any)  => {
+		if(quad.subject.termType == "NamedNode") {
+			// Assume that the name of the function matches the full
+			// URI of the thing so lets set the predicate correctly
+			ret.predicate = quad.subject.value;
+		}
+	});
+	store.statementsMatching($rdf.namedNode(ret.predicate), $rdf.namedNode(fno_parameter_str)).forEach((parameter:any) => {
+		parameter.object.elements.forEach((part: any) => {
+			const item = extract_types(store, part);
+			if(check_position(store, part, fno_subject_str)){
+				ret.subject = item;
+			} else {
+				ret.object = item;
+			}
+		});			
+	});
+
+	return ret;
+}
+
 async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[], listElementInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] }[] }> {
     const xsdValues: Set<string> = new Set();
     const fnoTypes: Set<string> = new Set();
@@ -306,6 +459,9 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
             if (rdfData) {
                 // Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
                 rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
+
+				const exampleN3 = TreeFetchAndExtract(rdfData);
+				connection.console.log(`The type of the function is: ${N3Type_to_str(exampleN3)}`);
 
 				const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
 				let parameterMatch;
