@@ -712,9 +712,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				}
 			
 				return allTypesValid;
-			}
-												
-		
+			} 
+			
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
 				connection.console.log("Invalid context or missing elements in triple.");
@@ -843,30 +842,32 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								// Check if the subject is a list, then validate each item type
 								if (subjectType === "list" || subjectType === "listOfFormulas") {
 									const listItems = infer_list_item_types(subjectText);
-									const variableNames = (subjectText.match(/\?[^\s()]+/g) || []); // Match variables starting with '?' but exclude parentheses
 									
-									// Process list items and assign expected types
-									variableNames.forEach(variableName => {
-										const expectedTypeForVariable = xsdValues.length > 0 ? xsdValues[0] : null;
-										if (expectedTypeForVariable) {
-											variableTypes[variableName] = typeMapping[expectedTypeForVariable] || expectedTypeForVariable;
-											connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
-										}
+									// For subject, all list items are undefined
+									const subjectExpectedTypes = listItems.map(() => "undefined");  // All types are undefined
+									
+									// Check the position of each variable and assign expected types
+									const variableNames = (subjectText.match(/\?[^\s()]+/g) || []); // Match variables starting with '?' but exclude parentheses
+								
+									// Process list items and assign expected types for variables (all undefined in subject list)
+									variableNames.forEach((variableName, index) => {
+										// Assign undefined as the expected type for variables in the subject list
+										variableTypes[variableName] = "undefined";
+										connection.console.log(`The variable "${variableName}" in list has an expected type of "undefined".`);
 									});
 								
-									// Validate types for the list items
-									const itemValidationResults = listItems.map(item => {
+									// Validate variable types for the list items
+									const itemValidationResults = listItems.map((item, index) => {
 										let expectedType;
 										if (item === "variable") {
-											// Use precomputed variable names
-											expectedType = variableNames.map(name => variableTypes[name] || "unknown").find(type => type !== "unknown");
+											// Use the type determined above for the variable (which is "undefined")
+											expectedType = variableTypes[variableNames[index]] || "undefined";
 										} else {
-											expectedType = undefined;
+											expectedType = "undefined";  // All list items in the subject are undefined
 										}
 								
-										const isValid = item === "variable"
-											? expectedType && expectedTypes.has(expectedType) // Check if the variable's expected type is valid
-											: expectedTypes.has(item); // For non-variable items, check directly against expected types
+										// If expected types are undefined or "any type", it should be considered valid
+										const isValid = expectedType === "undefined" || expectedType === "any type";
 								
 										return {
 											type: item,
@@ -881,18 +882,23 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									if (validItems.length > 0) {
 										connection.console.log(
 											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`include valid xsd:type values (${Array.from(expectedTypes).join(", ")}). Valid items: ${validItems.map(item => item.type).join(", ")}.`
+											`include valid xsd:type values. Valid items: ${validItems.map(item => item.type).join(", ")}.`
 										);
 									}
 								
 									if (invalidItems.length > 0) {
+										const invalidItemMessages = invalidItems.map(item => {
+											return `${item.type} (expected: ${item.expectedType})`;
+										});
+								
 										connection.console.log(
 											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`do not match the expected xsd:type values (${Array.from(expectedTypes).join(", ")}). Invalid items: ${invalidItems.map(item => `${item.type} (expected: ${item.expectedType || "undefined"})`).join(", ")}. ` +
-											`Expected types were: ${Array.from(expectedTypes).join(", ")}.`
+											`do not match the expected xsd:type values. Invalid items: ${invalidItemMessages.join(", ")}.`
 										);
+									} else {
+										connection.console.log(`The subject list items are valid.`);
 									}
-
+								
 									// Check whether the subject list needs to have a predefined number of elements
 									if (listElementInfo[0]?.subjectElementCount !== undefined) {
 										const expectedSubjectNumber = listElementInfo[0].subjectElementCount;
@@ -905,6 +911,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 									}
 								}
+								
 														
 								// Object type matching test
 								let objectTypeMatched = false;
@@ -926,117 +933,84 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								}
 								
 								// Check if the object is a list, then validate each item type
-								if (objectType === "list" || objectType === "listOfFormulas") {
-									const expectedType = objectTypes.find(fnoType => typeMapping[fnoType] === "listOfFormulas");
-
-									if (expectedType) {
-										const isValidObject = objectListItemTypes.every(type => type === "formula" || type === "variable");
+								let variableTypeLogged: Record<string, boolean> = {};
 								
-										if (isValidObject) {
+								// Check if the object is a list, then validate each item type
+								if (objectType === "list" || objectType === "listOfFormulas") {
+									const listItems = infer_list_item_types(objectText);
+								
+									// Define expected types for each item in the object list, based on the extracted structure
+									const objectExpectedTypes: (string | undefined)[] = [];
+								
+									// Set expected types for the object list items (e.g., xsd:integer for $o.1)
+									listElementInfo[0]?.objectListElementTypes?.forEach((expectedType, index) => {
+										objectExpectedTypes[index] = expectedType || "undefined"; // Assign "undefined" if no specific type is defined
+									});
+								
+									// Extract variable names from the object text
+									const variableNames = (objectText.match(/\?[^\s()]+/g) || []).map(name => name.trim());
+								
+									// Process each item in the list, including variables
+									const itemValidationResults = listItems.map((item, index) => {
+										let expectedType = objectExpectedTypes[index] || "undefined"; // Get the expected type for this list item
+								
+										// If it's a variable, check if we already have an expected type for it from earlier analysis
+										const variableName = variableNames.find((name: string) => objectText.includes(name));
+										if (variableName && variableTypes[variableName]) {
+											expectedType = variableTypes[variableName]; // Assign the correct expected type for the variable
+								
+											// Log the expected type for the variable
+											if (!variableTypeLogged[variableName]) {
+												connection.console.log(`The variable "${variableName}" in list has an expected type of "${expectedType}".`);
+												variableTypeLogged[variableName] = true; // Mark that we've logged this variable
+											}
+										} else if (variableName && !variableTypeLogged[variableName]) {
+											// If no explicit type is found for the variable, display it as having no expected type
+											expectedType = objectExpectedTypes[index] || "undefined";  // If expected type exists for this position, apply it
+											connection.console.log(`The variable "${variableName}" in list is expected to be of type "${expectedType}".`);
+											variableTypeLogged[variableName] = true; // Mark that we've logged this variable
+										}
+								
+										// Validate the item
+										const isValid = item === "variable" || expectedType === "undefined" || expectedType === "any type" || expectedType === item ||
+											(item === "float" && expectedType === "xsd:integer"); // Allow float -> integer coercion
+								
+										return { type: item, expectedType, isValid };
+									});
+								
+									const validItems = itemValidationResults.filter(result => result.isValid);
+									const invalidItems = itemValidationResults.filter(result => !result.isValid);
+								
+									if (validItems.length > 0) {
+										connection.console.log(
+											`The list item datatypes of object "${objectText}" (list item types: ${listItems.join(", ")}) ` +
+											`include valid types. Valid items: ${validItems.map(item => item.type).join(", ")}.`
+										);
+									}
+								
+									if (invalidItems.length > 0) {
+										connection.console.log(
+											`The list item datatypes of object "${objectText}" (list item types: ${listItems.join(", ")}) ` +
+											`do not match the expected types. Invalid items: ${invalidItems.map(item => `${item.type} (expected: ${item.expectedType})`).join(", ")}.`
+										);
+									}
+								
+									// Check whether the object list needs to have a predefined number of elements
+									if (listElementInfo[0]?.objectElementCount !== undefined) {
+										const expectedObjectNumber = listElementInfo[0].objectElementCount;
+										const objectItemNumber = validItems.length + invalidItems.length;
+										if (objectItemNumber !== expectedObjectNumber) {
 											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`are valid for the expected type log:Formula.`
+												`Error: Object list's element number does not match with the expected number of elements:\n` +
+												`\tExpected element number is ${expectedObjectNumber}, current number is ${objectItemNumber}`
 											);
 										} else {
 											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`are not valid for the expected type log:Formula.`
+												`Object list's element number matches with the expected number of elements.`
 											);
 										}
-									} else if (xsdValues.length > 0) {
-										const xsdTypeSet = new Set<string>(xsdValues.map((type: string) => typeMapping[type]));
-								
-										// Determine the expected fno datatype for variables
-										const expectedFnoVariableTypes = new Set<string>(
-											Object.keys(typeMapping).filter(key => typeMapping[key] === "variable")
-										);
-								
-										// Process list items and assign expected types
-										objectListItemTypes.forEach(type => {
-											if (type === "variable") {
-												// Extract variable names from the list item
-												const variableNames = objectText.match(/\?[^\s]+/g) || [];
-												
-												// Iterate over all found variable names
-												variableNames.forEach(variableName => {
-													const expectedTypeForVariable = xsdValues.length > 0 ? xsdValues[0] : null;
-													if (expectedTypeForVariable) {
-														variableTypes[variableName] = typeMapping[expectedTypeForVariable] || expectedTypeForVariable;
-														connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
-													}
-												});
-											}
-										});
-								
-										// Validate types for the list items
-										const itemValidationResults = objectListItemTypes.map(type => {
-											let expectedType;
-											if (type === "variable") {
-												// Extract variable names from the list item
-												const variableNames = objectText.match(/\?[^\s]+/g) || [];
-												
-												// Iterate over all found variable names
-												variableNames.forEach(variableName => {
-													expectedType = variableTypes[variableName] || "unknown"; // Default to "unknown" if not found
-													//connection.console.log(`Debug: Variable "${variableName}" in list has an expected type of "${expectedType}".`);
-												});
-											} else {
-												expectedType = undefined;
-											}
-								
-											const isValid = type === "variable"
-												? expectedType && xsdTypeSet.has(expectedType) // Check if the variable's expected type is valid
-												: xsdTypeSet.has(type); // For non-variable items, check directly against expected types
-								
-											return {
-												type,
-												expectedType,
-												isValid
-											};
-										});
-								
-										const validItems = itemValidationResults.filter(result => result.isValid);
-										const invalidItems = itemValidationResults.filter(result => !result.isValid);
-								
-										if (validItems.length > 0) {
-											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`include valid xsd:type values (${Array.from(xsdTypeSet).join(", ")}). Valid items: ${validItems.map(item => item.type).join(", ")}.`
-											);
-										}
-								
-										if (invalidItems.length > 0) {
-											// Check for invalid variable types and log details
-											const invalidVariableTypes = invalidItems
-												.filter(item => item.type === "variable")
-												.map(item => item.type);
-								
-											connection.console.log(
-												`The list item datatypes of object "${objectText}" (list item types: ${objectListItemTypes.join(", ")}) ` +
-												`do not match the expected xsd:type values (${Array.from(xsdTypeSet).join(", ")}). Invalid items: ${invalidItems.map(item => item.type).join(", ")}.`
-											);
-								
-											if (invalidVariableTypes.length > 0) {
-												connection.console.log(
-													`The invalid variable items are compared against the expected fno variable types: ${Array.from(expectedFnoVariableTypes).join(", ")}.`
-												);
-											}
-
-											// Check whether the object list needs to have a predefined number of elements
-											if (listElementInfo[0]?.objectElementCount !== undefined) {
-												const expectedObjectNumber = listElementInfo[0].objectElementCount;
-												const objectItemNumber = validItems.length + invalidItems.length;
-												if (objectItemNumber !== expectedObjectNumber) {
-													connection.console.log(`Error: Object list's element number does not match with the expected number of elements:\n` +
-														`\tExpected element number is ${expectedObjectNumber}, current number is ${objectItemNumber}`);
-												} else {
-													connection.console.log(`Object list's element number matches with the expected number of elements.`);
-												}
-											}
-										
-										}
-									}
-								}                                
+									}								
+								}																																						  
 							} 
 							else {
 								connection.console.log("Skipping type comparison due to syntax error.");
