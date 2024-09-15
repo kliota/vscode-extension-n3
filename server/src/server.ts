@@ -460,6 +460,9 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
+	// After fnoTypes have been processed, add a log statement like this
+	console.log("Captured fno:types:", Array.from(fnoTypes));
+
 
     return {
         xsdValues: Array.from(xsdValues),
@@ -857,50 +860,77 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
+
+								// Track variables already logged to avoid duplicates
+								const loggedVariables: Set<string> = new Set();
 								
 								// Check if the subject is a list, then validate each item type
-
 								if (subjectType === "list" || subjectType === "listOfFormulas") {
 									const listItems = infer_list_item_types(subjectText);
 								
-									// Initialize subjectExpectedTypes based on the number of list items
-									const subjectExpectedTypes = listItems.map(() => "undefined");
+									// Initialize expected types for the subject list items
+									const subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
 								
 									// Dynamically extract expected types from listElementInfo for subject
 									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
-										// Assign xsd types from the parsed metadata
-										if (expectedType.includes('xsd')) {
-											subjectExpectedTypes[index] = expectedType;
+										expectedType = expectedType.trim();
+								
+										if (expectedType.includes('owl:unionOf')) {
+											// Parse the union types from the expected type
+											const unionTypeMatch = expectedType.match(/owl:unionOf\s*\((.*?)\)/);
+											if (unionTypeMatch) {
+												const unionTypes = unionTypeMatch[1].match(/xsd:\w+/g);  // Extract individual xsd types
+												subjectExpectedTypes[index] = unionTypes ? unionTypes : ["undefined"]; // Store parsed types or undefined
+											}
+										} else if (expectedType.includes('xsd')) {
+											subjectExpectedTypes[index] = expectedType;  // Assign single XSD type
 										} else {
 											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
 										}
 									});
 								
-									// Extract variable names from the subject text
-									const variableNames = (subjectText.match(/\?[^\s()]+/g) || []).map(name => name.trim());
-								
-									// Process list items and assign expected types for variables
-									variableNames.forEach((variableName, index) => {
-										// Check if the expected type for this variable is in subjectExpectedTypes
-										if (subjectExpectedTypes[index] && subjectExpectedTypes[index] !== "undefined") {
-											variableTypes[variableName] = subjectExpectedTypes[index];  // Assign the expected type to the variable
+									// Ensure all list elements get the same expected type if the function specifies a single type for the list
+									if (listElementInfo[0]?.subjectListElementTypes?.length === 1) {
+										for (let i = 0; i < listItems.length; i++) {
+											subjectExpectedTypes[i] = subjectExpectedTypes[0];  // Apply the same type to all list elements
 										}
-										
-										connection.console.log(`The variable "${variableName}" in list has an expected type of "${variableTypes[variableName]}".`);
-									});
+									}
 								
-									// Validate variable types for the list items
+									// Process the variables and validate against the extracted expected types
 									const itemValidationResults = listItems.map((item, index) => {
 										let expectedType = subjectExpectedTypes[index] || "undefined";
 								
-										if (item === "variable") {
-											expectedType = variableTypes[variableNames[index]] || "undefined";
+										// Extract variable names from the subject text
+										const variableMatch = subjectText.match(/\?[^\s()]+/g);
+								
+										if (variableMatch) {
+											variableMatch.forEach((variableName, i) => {
+												let varExpectedType = subjectExpectedTypes[i] || "undefined";
+												// Log only if this variable hasn't been logged yet
+												if (!loggedVariables.has(variableName)) {
+													connection.console.log(`The variable "${variableName}" is of expected type "${varExpectedType}"`);
+													loggedVariables.add(variableName);  // Mark this variable as logged
+												}
+											});
 										}
 								
-										// If expected types are undefined or "any type", it should be considered valid
-										const isValid = expectedType === "undefined" || expectedType === "any type" || expectedType === item;
+										// If the expected type is a union of types, check if the item matches any of the expected types
+										if (Array.isArray(expectedType)) {
+											const isValid = expectedType.includes(item) || 
+															(item === "float" && expectedType.includes("xsd:float")) ||  // Allow float if xsd:float is part of the union
+															(item === "variable"); // Variables are valid by default
 								
-										return { type: item, expectedType, isValid };
+											return { type: item, expectedType: expectedType.join(", "), isValid };
+										}
+								
+										// If it's a single type, validate normally
+										const isValid = expectedType === item || 
+														(expectedType === "xsd:string" && item === "string") || 
+														(expectedType === "xsd:float" && item === "float") || 
+														item === "variable" || 
+														expectedType === "undefined";
+								
+										return { type: item, expectedType, isValid };										
 									});
 								
 									const validItems = itemValidationResults.filter(result => result.isValid);
@@ -914,7 +944,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									}
 								
 									if (invalidItems.length > 0) {
-										const invalidItemMessages = invalidItems.map(item => `${item.type} (expected: ${item.expectedType})`);
+										const invalidItemMessages = invalidItems.map(item => {
+											return `${item.type} (expected: ${item.expectedType})`;
+										});
+								
 										connection.console.log(
 											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
 											`do not match the expected xsd:type values. Invalid items: ${invalidItemMessages.join(", ")}.`
@@ -923,40 +956,43 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										connection.console.log(`The subject list items are valid.`);
 									}
 								
-									// Check whether the subject list needs to have a predefined number of elements
+									// Additional checks for element counts (if needed)
 									if (listElementInfo[0]?.subjectElementCount !== undefined) {
 										const expectedSubjectNumber = listElementInfo[0].subjectElementCount;
 										const subjectItemNumber = validItems.length + invalidItems.length;
 										if (subjectItemNumber !== expectedSubjectNumber) {
-											connection.console.log(
-												`Error: Subject list's element number does not match with the expected number of elements:\n` +
-												`\tExpected element number is ${expectedSubjectNumber}, current number is ${subjectItemNumber}`
-											);
+											connection.console.log(`Error: Subject list's element number does not match the expected number of elements:\n` +
+												`\tExpected element number is ${expectedSubjectNumber}, current number is ${subjectItemNumber}`);
 										} else {
-											connection.console.log(`Subject list's element number matches with the expected number of elements.`);
+											connection.console.log(`Subject list's element number matches the expected number of elements.`);
 										}
 									}
-								}								
-																						
+								}
+								
 								// Object type matching test
 								let objectTypeMatched = false;
+								
+								// Iterate over the extracted object types and try to match them with the actual object type
 								for (const fnoType of objectTypes) {
 									if (objectType === "variable" || 
 										typeMapping[fnoType] === objectType || 
+										(fnoType === "xsd:string" && objectType === "string") ||  // Ensure xsd:string matches string
 										(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
 										(fnoType === "log:Formula" && objectType === "list")) {
-										connection.console.log(`The object data type ${objectType}-${fnoType} and fno:type "${fnoType}" match.`);
+										connection.console.log(`The object data type ${objectType} and fno:type "${fnoType}" match.`);
 										objectTypeMatched = true;
 										break;
 									}
 								}
 								
+								// Log a message if no match is found for the object type
 								if (!objectTypeMatched) {
 									for (const fnoType of objectTypes) {
 										connection.console.log(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
 								
+																							
 								// Check if the object is a list, then validate each item type
 								let variableTypeLogged: Record<string, boolean> = {};
 								
@@ -1016,9 +1052,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									if (invalidItems.length > 0) {
 										connection.console.log(
 											`The list item datatypes of object "${objectText}" (list item types: ${listItems.join(", ")}) ` +
-											`do not match the expected types. Invalid items: ${invalidItems.map(item => `${item.type} (expected: ${item.expectedType})`).join(", ")}.`
+											`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${objectText.split(/[()]/)[1].split(" ")[index]} (expected: ${item.expectedType})`).join(", ")}.`
 										);
-									}
+										}									
 								
 									// Check whether the object list needs to have a predefined number of elements
 									if (listElementInfo[0]?.objectElementCount !== undefined) {
