@@ -650,7 +650,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			}
 		
 			// Recursive function to infer types of items in a list, handling nested lists and formulas of any depth
-			function infer_list_item_types(listValue: string): string[] {
+			function infer_list_item_types(listValue: string): [string[], string[]] {
 				// Remove outer parentheses
 				const innerValue = listValue.slice(1, -1).trim();
 				const items: string[] = [];
@@ -692,8 +692,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (currentItem.trim()) {
 					items.push(currentItem.trim());
 				}
-			
-				return items.map(item => infer_data_type(item));
+
+				return [items, items.map(item => infer_data_type(item))];
 			}					   
 		
 			function validate_variable_types(types: string[], expectedTypes: Set<string>, variableTypes: Record<string, string>): boolean {
@@ -773,18 +773,21 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				`verb (first): ${ctx_text(verb)} (rule: ${term_prod(verb)})\n` +
 				`object (first): ${ctx_text(object)} (rule: ${term_prod(object)}, type: ${objectType})`;
 		
+			let subjectItems: string[] = [];
+			let objectItems: string[] = [];
+
 			let subjectListItemTypes: string[] = [];
 			let objectListItemTypes: string[] = [];  // Separate array for object list item types
 		
 			// Check and infer subject list item types
 			if (subjectType === "list" || subjectType === "listOfFormulas") {
-				subjectListItemTypes = infer_list_item_types(subjectText);
+				[subjectItems, subjectListItemTypes] = infer_list_item_types(subjectText);
 				output += `\nSubject list item types: ${subjectListItemTypes.join(", ")}`;
 			}
 		
 			// Check and infer object list item types
 			if (objectType === "list" || objectType === "listOfFormulas") {
-				objectListItemTypes = infer_list_item_types(objectText);
+				[objectItems, objectListItemTypes] = infer_list_item_types(objectText);
 				output += `\nObject list item types: ${objectListItemTypes.join(", ")}`;
 			}
 				
@@ -866,7 +869,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 								// Check if the subject is a list, then validate each item type
 								if (subjectType === "list" || subjectType === "listOfFormulas") {
-									const listItems = infer_list_item_types(subjectText);
+									let listItems:string[] = []; 
+									let items:string [] = [];
+									[items, listItems] = infer_list_item_types(subjectText);
 								
 									// Initialize expected types for the subject list items
 									const subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
@@ -898,14 +903,15 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 									// Process the variables and validate against the extracted expected types
 									const itemValidationResults = listItems.map((item, index) => {
-										let expectedType = subjectExpectedTypes[index] || "undefined";
+										const expectedType = subjectExpectedTypes[index] || "undefined";
+										const actualValue = items[index]; 
 								
 										// Extract variable names from the subject text
 										const variableMatch = subjectText.match(/\?[^\s()]+/g);
 								
 										if (variableMatch) {
 											variableMatch.forEach((variableName, i) => {
-												let varExpectedType = subjectExpectedTypes[i] || "undefined";
+												const varExpectedType = subjectExpectedTypes[i] || "undefined";
 												// Log only if this variable hasn't been logged yet
 												if (!loggedVariables.has(variableName)) {
 													connection.console.log(`The variable "${variableName}" is of expected type "${varExpectedType}"`);
@@ -920,7 +926,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 															(item === "float" && expectedType.includes("xsd:float")) ||  // Allow float if xsd:float is part of the union
 															(item === "variable"); // Variables are valid by default
 								
-											return { type: item, expectedType: expectedType.join(", "), isValid };
+											return { type: item, expectedType: expectedType.join(", "), isValid, value: actualValue };
 										}
 								
 										// If it's a single type, validate normally
@@ -929,8 +935,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 														(expectedType === "xsd:float" && item === "float") || 
 														item === "variable" || 
 														expectedType === "undefined";
-								
-										return { type: item, expectedType, isValid };										
+										return {
+												type: item,
+												value: actualValue,  // Storing the actual item value here
+												expectedType,
+												isValid
+											};										
 									});
 								
 									const validItems = itemValidationResults.filter(result => result.isValid);
@@ -945,7 +955,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 									if (invalidItems.length > 0) {
 										const invalidItemMessages = invalidItems.map(item => {
-											return `${item.type} (expected: ${item.expectedType})`;
+											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
 										});
 								
 										connection.console.log(
@@ -994,11 +1004,13 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 																							
 								// Check if the object is a list, then validate each item type
-								let variableTypeLogged: Record<string, boolean> = {};
+								const variableTypeLogged: Record<string, boolean> = {};
 								
 								// Check if the object is a list, then validate each item type
 								if (objectType === "list" || objectType === "listOfFormulas") {
-									const listItems = infer_list_item_types(objectText);
+									let listItems:string[] = []; 
+									let items:string [] = [];
+									[items, listItems] = infer_list_item_types(subjectText);
 								
 									// Define expected types for each item in the object list, based on the extracted structure
 									const objectExpectedTypes: (string | undefined)[] = [];
