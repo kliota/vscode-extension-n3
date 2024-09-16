@@ -1010,7 +1010,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								if (objectType === "list" || objectType === "listOfFormulas") {
 									let listItems:string[] = []; 
 									let items:string [] = [];
-									[items, listItems] = infer_list_item_types(subjectText);
+									[items, listItems] = infer_list_item_types(objectText);
 								
 									// Define expected types for each item in the object list, based on the extracted structure
 									const objectExpectedTypes: (string | undefined)[] = [];
