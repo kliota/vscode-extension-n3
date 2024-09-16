@@ -388,8 +388,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     const objectMultitypeListElementTypeRegex = /\$o([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
                     const typeCaptureRegex = /fno:type\s*([\w:]+)/g;
 					const typeCaptureRegexSubject = /fno:type\s*\[\s*rdf:type\s*rdfs:Datatype\s*;\s*owl:unionOf\s*\((.*?)\)\s*\]/g;
-
-
+					
                     const subjectListElementTypes: string[] = [];
                     const objectListElementTypes: string[] = [];
 
@@ -399,16 +398,20 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     }
 
                     // For multitype subject lists such as s.1, s.2 etc.
-                    while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        const listBlock = match[2]; // the full content of `fnon:listElements`
-						
-                        // Find all `fno:type` inside this block
+					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
+						const listBlock = match[2]; // the full content of `fnon:listElements`
+					
+						// Handle each occurrence of owl:unionOf separately within the listBlock
 						let typeMatch;
+						let elementIndex = 1;
 						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-							const unionTypes = typeMatch[1].split(/\s+/);  // Split the union types into an array
-							subjectListElementTypes.push(...unionTypes);  // Add the union types to the subject list element types
-						}	
-                    }
+							//const unionTypes = typeMatch[1].split(/\s+/);  // Split the union types into an array
+							const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);  // This filters out any empty strings
+							subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");  // Convert unionTypes array to a string
+							console.log(`Parsed union types for list element ${elementIndex}: ${unionTypes.join(", ")}`);
+							elementIndex++;
+						}
+					}
 
                     // For multitype object lists such as o.1, o.2 etc.
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
