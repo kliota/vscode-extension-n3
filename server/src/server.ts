@@ -286,6 +286,10 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
     return false;
 }
 
+// This type represents all possible types in N3.
+// It is a union type that maps type names to their corresponding TypeScript types.
+// The values can either be null or their actual types.
+// This allows for representing both concrete values and variables simultaneously.
 type N3Type = 
 	| {kind: 'list' | 'formula'; list: N3Type[] | null}
 	| {kind: 'float' | 'double' | 'decimal' | 'integer'; num: number | null}
@@ -293,12 +297,14 @@ type N3Type =
 	| {kind: 'triple'; subject: N3Type | null; predicate: string | null; object: N3Type | null}
 	| null
 
+// Predicates
 const fno_subject_str = "https://w3id.org/function/ontology/n3#subject" as const;
 const fno_object_str = "https://w3id.org/function/ontology/n3#object" as const;
 const fno_position_str = "https://w3id.org/function/ontology/n3#position" as const;
 const fno_parameter_str = "https://w3id.org/function/ontology#parameter" as const;
 const fno_type_str = "https://w3id.org/function/ontology#type" as const;
 const fno_list_elements_str = "https://w3id.org/function/ontology/n3#listElements" as const;
+const fno_list_element_type_str = "https://w3id.org/function/ontology/n3#istElementType" as const;
 
 const rdf_list_str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#List" as const;
 const xsd_integer_str = "http://www.w3.org/2001/XMLSchema#integer" as const;
@@ -327,10 +333,12 @@ function extract_types(rdf_graph:any, parameter: any): N3Type {
 				});
 				ret_n3={kind:"list", list:the_list};
 			}	
+			// TODO add case for fno_list_element_type_str
 			break;
 		case xsd_integer_str:
 			ret_n3 = {kind: "integer", num:null};
 			break;
+		// TODO: Add a case for unionOf		https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/math/sum.n3
 	}
 	return ret_n3;
 }
@@ -383,6 +391,8 @@ function TreeFetchAndExtract(rdfData:any):N3Type {
 	const store = $rdf.graph();
 	const base = "http://example.org/";
 	$rdf.parse(rdfData, store, base, 'text/turtle');
+	// Use statementsMatching to traverse the rdf graph
+	// https://linkeddata.github.io/rdflib.js/doc/classes/Store.html#statementsMatching
 	store.statementsMatching().forEach((quad: any)  => {
 		if(quad.subject.termType == "NamedNode") {
 			// Assume that the name of the function matches the full
