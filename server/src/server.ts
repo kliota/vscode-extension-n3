@@ -387,24 +387,27 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     const subjectMultitypeListElementTypeRegex = /\$s([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)([\s\S]*?)\$o/g;
                     const objectMultitypeListElementTypeRegex = /\$o([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
                     const typeCaptureRegex = /fno:type\s*([\w:]+)/g;
+					const typeCaptureRegexSubject = /fno:type\s*\[\s*rdf:type\s*rdfs:Datatype\s*;\s*owl:unionOf\s*\((.*?)\)\s*\]/g;
+
 
                     const subjectListElementTypes: string[] = [];
                     const objectListElementTypes: string[] = [];
 
                     // For monotype subject lists
                     while ((match = monotypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        subjectListElementTypes.push(match[2]);
+                        subjectListElementTypes.push(match[2]);						
                     }
 
                     // For multitype subject lists such as s.1, s.2 etc.
                     while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
                         const listBlock = match[2]; // the full content of `fnon:listElements`
-
+						
                         // Find all `fno:type` inside this block
-                        let typeMatch;
-                        while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
-                            subjectListElementTypes.push(typeMatch[1]); // the value of `fno:type`
-                        }
+						let typeMatch;
+						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
+							const unionTypes = typeMatch[1].split(/\s+/);  // Split the union types into an array
+							subjectListElementTypes.push(...unionTypes);  // Add the union types to the subject list element types
+						}	
                     }
 
                     // For multitype object lists such as o.1, o.2 etc.
@@ -419,7 +422,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
                     // Store list element types
                     if (subjectListElementTypes.length > 0) {
-                        listInfo.subjectListElementTypes = subjectListElementTypes;
+                        listInfo.subjectListElementTypes = subjectListElementTypes
                     }
 
                     if (objectListElementTypes.length > 0) {
@@ -461,8 +464,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
         console.error('Error fetching RDF data:', error);
     }
 	// After fnoTypes have been processed, add a log statement like this
-	console.log("Captured fno:types:", Array.from(fnoTypes));
-
+	//console.log("Captured fno:types:", Array.from(fnoTypes));
 
     return {
         xsdValues: Array.from(xsdValues),
@@ -735,6 +737,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			
 				return allTypesValid;
 			} 
+
 			
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
@@ -818,6 +821,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								const typeMapping: Record<string, string> = {
 									"rdf:List": "list",  // Treat rdf:List as a list
 									"xsd:float": "float",
+									"xsd:decimal": "decimal",
 									"xsd:string": "string",
 									"rdf:Function": "function",
 									"log:Formula": "listOfFormulas",  // Maps log:Formula to listOfFormulas
@@ -875,11 +879,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 									// Initialize expected types for the subject list items
 									const subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
-								
+
 									// Dynamically extract expected types from listElementInfo for subject
 									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
 										expectedType = expectedType.trim();
-								
+									
 										if (expectedType.includes('owl:unionOf')) {
 											// Parse the union types from the expected type
 											const unionTypeMatch = expectedType.match(/owl:unionOf\s*\((.*?)\)/);
@@ -893,7 +897,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
 										}
 									});
-								
+																										
 									// Ensure all list elements get the same expected type if the function specifies a single type for the list
 									if (listElementInfo[0]?.subjectListElementTypes?.length === 1) {
 										for (let i = 0; i < listItems.length; i++) {
@@ -924,6 +928,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										if (Array.isArray(expectedType)) {
 											const isValid = expectedType.includes(item) || 
 															(item === "float" && expectedType.includes("xsd:float")) ||  // Allow float if xsd:float is part of the union
+															(item === "double" && expectedType.includes("xsd:double")) ||  // Allow integer if xsd:integer is part of the union
+															(item === "decimal" && expectedType.includes("xsd:decimal")) ||  // Allow decimal if xsd:decimal is part of the union
 															(item === "variable"); // Variables are valid by default
 								
 											return { type: item, expectedType: expectedType.join(", "), isValid, value: actualValue };
@@ -932,7 +938,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										// If it's a single type, validate normally
 										const isValid = expectedType === item || 
 														(expectedType === "xsd:string" && item === "string") || 
-														(expectedType === "xsd:float" && item === "float") || 
+														(expectedType === "xsd:float" && item === "float") ||
+														(expectedType === "xsd:decimal" && item === "decimal") || 
 														item === "variable" || 
 														expectedType === "undefined";
 										return {
@@ -947,9 +954,15 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									const invalidItems = itemValidationResults.filter(result => !result.isValid);
 								
 									if (validItems.length > 0) {
+										const validItemMessages = validItems.map(item => {
+											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
+										});
 										connection.console.log(
 											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`include valid xsd:type values. Valid items: ${validItems.map(item => item.type).join(", ")}.`
+											`match the expected xsd:type values. Valid items: ${validItems.map(item => `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`).join(", ")}.`
+										//connection.console.log(
+											//`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
+											//`include valid xsd:type values. Valid items: ${validItems.map(item => item.type).join(", ")}.`
 										);
 									}
 								
