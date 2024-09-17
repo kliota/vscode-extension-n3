@@ -234,7 +234,6 @@ async function fetchBuiltIns(): Promise<Map<string, Set<string>>> {
 		const functionRegex = /<a class="qname" href="[^"]+">(\w+):(\w+)<\/a> <span class="keyword">a<\/span> <a class="qname" href="[^"]+">e:Builtin<\/a>\./g;
 
         let match;
-        let matchCount = 0;
 
 		// Loop through all matches found using the regex
         while ((match = functionRegex.exec(data)) !== null) {
@@ -297,22 +296,24 @@ type N3Type =
 	| {kind: 'triple'; subject: N3Type | null; predicate: string | null; object: N3Type | null}
 	| null
 
-// Predicates
+// Predicates (URI strings for common RDF terms and types)
 const fno_subject_str = "https://w3id.org/function/ontology/n3#subject" as const;
 const fno_object_str = "https://w3id.org/function/ontology/n3#object" as const;
 const fno_position_str = "https://w3id.org/function/ontology/n3#position" as const;
 const fno_parameter_str = "https://w3id.org/function/ontology#parameter" as const;
 const fno_type_str = "https://w3id.org/function/ontology#type" as const;
 const fno_list_elements_str = "https://w3id.org/function/ontology/n3#listElements" as const;
-const fno_list_element_type_str = "https://w3id.org/function/ontology/n3#istElementType" as const;
+const fno_list_element_type_str = "https://w3id.org/function/ontology/n3#listElementType" as const;
 
 const rdf_list_str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#List" as const;
 const xsd_integer_str = "http://www.w3.org/2001/XMLSchema#integer" as const;
 
+// Checks if a particular parameter in an RDF graph has a position that matches either subject or object.
 function check_position(rdf_graph:any, parameter: any, is: typeof fno_subject_str | typeof fno_object_str): boolean {
 	return rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_position_str))[0].object.value == is;
 }
 
+// Extracts types for a given parameter from the RDF graph
 function extract_types(rdf_graph:any, parameter: any): N3Type {
 	let ret_n3: N3Type= null;
 	const temp_type = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_type_str));
@@ -320,8 +321,8 @@ function extract_types(rdf_graph:any, parameter: any): N3Type {
 		return ret_n3;
 	}
 	switch (rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_type_str))[0].object.value){
-		case rdf_list_str:
-			const list_item_types = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_elements_str));
+		case rdf_list_str:	// if parameter is a list.
+			const list_item_types = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_element_type_str));	// case fnon:listElementType eg math:product
 			if(list_item_types.length == 0){
 				ret_n3={kind:"list", list:null};
 			} else {
@@ -332,10 +333,17 @@ function extract_types(rdf_graph:any, parameter: any): N3Type {
 					the_list.push(item_n3);
 				});
 				ret_n3={kind:"list", list:the_list};
-			}	
-			// TODO add case for fno_list_element_type_str
+			}
+			// TODO add case for fno_list_elements_str
+			const list_item_types_n = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_elements_str));	// case fnon:listElements eg math:exponentiation
+			if(list_item_types.length == 0 || list_item_types.length == 1){
+				ret_n3={kind:"list", list:null};
+			} else {
+				const temp_list = list_item_types[1].object;
+				const the_list: N3Type[] = [];
+			}
 			break;
-		case xsd_integer_str:
+		case xsd_integer_str: // if type is integer.
 			ret_n3 = {kind: "integer", num:null};
 			break;
 		// TODO: Add a case for unionOf		https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/math/sum.n3
@@ -343,6 +351,7 @@ function extract_types(rdf_graph:any, parameter: any): N3Type {
 	return ret_n3;
 }
 
+// Converts an N3-type object to a string.
 function N3Type_to_str(to_print: N3Type) : string {
 	let ret = "";
 	if(!to_print)
