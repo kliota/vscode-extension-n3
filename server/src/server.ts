@@ -394,24 +394,35 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
                     // For monotype subject lists
                     while ((match = monotypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        subjectListElementTypes.push(match[2]);						
+                        subjectListElementTypes.push(match[2]);					
                     }
 
                     // For multitype subject lists such as s.1, s.2 etc.
 					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
 						const listBlock = match[2]; // the full content of `fnon:listElements`
 					
-						// Handle each occurrence of owl:unionOf separately within the listBlock
 						let typeMatch;
 						let elementIndex = 1;
+						
+						// This loop processes each owl:unionOf block
 						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-							//const unionTypes = typeMatch[1].split(/\s+/);  // Split the union types into an array
+							// Ensure union types are joined by ", " for consistency
 							const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);  // This filters out any empty strings
-							subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");  // Convert unionTypes array to a string
+							subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");  // Join union types with commas
 							console.log(`Parsed union types for list element ${elementIndex}: ${unionTypes.join(", ")}`);
 							elementIndex++;
 						}
-					}
+					}					
+
+					// For multitype object lists such as o.1, o.2 etc.
+					/*while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
+						const listBlock = match[2];
+
+						let typeMatch;
+						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
+							subjectListElementTypes.push(typeMatch[1]);
+						}
+					}*/
 
                     // For multitype object lists such as o.1, o.2 etc.
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
@@ -848,6 +859,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
 									}
 								}
+								
 		
 								// Prepare the set of expected types
 								const expectedTypes = new Set<string>(xsdValues.map(type => typeMapping[type] || type));
@@ -910,8 +922,19 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 									// Process the variables and validate against the extracted expected types
 									const itemValidationResults = listItems.map((item, index) => {
-										const expectedType = subjectExpectedTypes[index] || "undefined";
-										const actualValue = items[index]; 
+										const expectedTypeString = subjectExpectedTypes[index] || "undefined";
+										const actualValue = items[index];
+									
+										// Split expectedTypeString into an array if it's a string of multiple types
+										const expectedTypes = Array.isArray(expectedTypeString) ? expectedTypeString : expectedTypeString.split(", ");
+										//const expectedTypes = Array.isArray(subjectExpectedTypes[index]) ? subjectExpectedTypes[index] : [subjectExpectedTypes[index]];
+									
+										console.log(`List items: ${listItems.join(", ")}`);
+										// Log the current item, its expected types, and its actual value
+										console.log(`Comparing item ${index + 1}:`);
+										console.log(`  - Actual item: Type: ${item}, Value: ${actualValue}`);
+										console.log(`  - Expected type(s): ${expectedTypes.join(", ")}`);
+									
 								
 										// Extract variable names from the subject text
 										const variableMatch = subjectText.match(/\?[^\s()]+/g);
@@ -926,35 +949,65 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												}
 											});
 										}
-								
-										// If the expected type is a union of types, check if the item matches any of the expected types
-										if (Array.isArray(expectedType)) {
-											const isValid = expectedType.includes(item) || 
-															(item === "float" && expectedType.includes("xsd:float")) ||  // Allow float if xsd:float is part of the union
-															(item === "double" && expectedType.includes("xsd:double")) ||  // Allow integer if xsd:integer is part of the union
-															(item === "decimal" && expectedType.includes("xsd:decimal")) ||  // Allow decimal if xsd:decimal is part of the union
-															(item === "variable"); // Variables are valid by default
-								
-											return { type: item, expectedType: expectedType.join(", "), isValid, value: actualValue };
-										}
-								
-										// If it's a single type, validate normally
-										const isValid = expectedType === item || 
-														(expectedType === "xsd:string" && item === "string") || 
-														(expectedType === "xsd:float" && item === "float") ||
-														(expectedType === "xsd:decimal" && item === "decimal") || 
-														item === "variable" || 
-														expectedType === "undefined";
-										return {
+
+										if (item === "variable") {
+											console.log(`    -> Item "${item}" is a variable and is automatically valid.`);
+											return {
 												type: item,
-												value: actualValue,  // Storing the actual item value here
-												expectedType,
-												isValid
-											};										
+												expectedType: expectedTypes.join(", "),
+												isValid: true,  // Variables are always valid
+												value: actualValue
+											};
+										}
+										// If the expected type is a union of types, check if the item matches any of the expected types
+										
+										function mapToXsdType(itemType: string) {
+											switch (itemType) {
+												case "float":
+													return ["xsd:float", "xsd:double", "xsd:decimal"];
+												case "decimal":
+													return ["xsd:decimal"];
+												case "double":
+													return ["xsd:double"];
+												default:
+													return [itemType];
+											}
+										}
+
+										const itemXsdTypes = mapToXsdType(item); // Convert item to its XSD equivalents
+
+										// Log the mapped XSD types for the current item
+										console.log(`  - Mapped XSD types for item ${index + 1}: ${itemXsdTypes.join(", ")}`);
+									
+										// If the expected type is a union of types, check if the item matches any of the expected types
+										const isValidXsdType = itemXsdTypes.some((itemXsdType) => {
+											const isTypeValid = expectedTypes.includes(itemXsdType);
+											//console.log(`    -> Comparing item XSD type "${itemXsdType}" with expected types "${expectedTypes.join(", ")}"`);
+											//console.log(`    -> Is this valid? ${isTypeValid ? "Yes" : "No"}`);
+											return isTypeValid;
+										});
+									
+										// Check if the item matches any expected type directly
+										const isValidSingleType = expectedTypes.includes(item) ||
+																  (expectedTypes.includes("xsd:string") && item === "string") ||
+																  (expectedTypes.includes("xsd:float") && item === "float") ||
+																  (expectedTypes.includes("xsd:decimal") && item === "decimal") ||
+																  expectedTypes.includes("undefined");
+									
+										// Combine the XSD type check with single type validation logic
+										const isValid = isValidXsdType || isValidSingleType;
+									
+										return {
+											type: item,
+											expectedType: expectedTypes.join(", "),  // Join expected types for logging if it's an array
+											isValid,
+											value: actualValue
+										};
 									});
-								
+									
+
 									const validItems = itemValidationResults.filter(result => result.isValid);
-									const invalidItems = itemValidationResults.filter(result => !result.isValid);
+									const invalidItems = itemValidationResults.filter(result => !result.isValid );  // Exclude variables from invalid items
 								
 									if (validItems.length > 0) {
 										const validItemMessages = validItems.map(item => {
