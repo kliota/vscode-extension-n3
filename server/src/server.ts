@@ -291,9 +291,11 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
 // This allows for representing both concrete values and variables simultaneously.
 type N3Type = 
 	| {kind: 'list' | 'formula'; list: N3Type[] | null}
+	| {kind: 'typedlist'; list: N3Type[] | null; type: N3Type}
 	| {kind: 'float' | 'double' | 'decimal' | 'integer'; num: number | null}
 	| {kind: 'string' | 'uri' | 'function'; str: string | null}
 	| {kind: 'triple'; subject: N3Type | null; predicate: string | null; object: N3Type | null}
+	| {kind: 'union'; types: N3Type[]}
 	| null
 
 // Predicates (URI strings for common RDF terms and types)
@@ -307,10 +309,55 @@ const fno_list_element_type_str = "https://w3id.org/function/ontology/n3#listEle
 
 const rdf_list_str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#List" as const;
 const xsd_integer_str = "http://www.w3.org/2001/XMLSchema#integer" as const;
+const xsd_decimal_str = "http://www.w3.org/2001/XMLSchema#decimal" as const;
+const xsd_double_str = "http://www.w3.org/2001/XMLSchema#double" as const;
+const xsd_float_str = "http://www.w3.org/2001/XMLSchema#float" as const;
 
+const owl_union_str = "http://www.w3.org/2002/07/owl#unionOf";
 // Checks if a particular parameter in an RDF graph has a position that matches either subject or object.
 function check_position(rdf_graph:any, parameter: any, is: typeof fno_subject_str | typeof fno_object_str): boolean {
 	return rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_position_str))[0].object.value == is;
+}
+
+function translate_type(rdf_graph:any, parameter: any, type: string, expand = true): N3Type {
+	let ret_n3: N3Type= null;
+	switch (type){
+		case rdf_list_str:	// if parameter is a list.
+			ret_n3={kind:"list", list:null};	
+			if (expand == false)
+					break;
+			let list_item_types = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_elements_str));	// case fnon:listElements eg math:exponentation
+			if(list_item_types.length != 0){
+				const temp_list = list_item_types[0].object;
+				const the_list: N3Type[] = [];
+				temp_list.elements.forEach((item:any) =>{
+					const item_n3 = extract_types(rdf_graph, item);
+					the_list.push(item_n3);
+				});
+				ret_n3={kind:"list", list:the_list};
+				break;
+			}
+			list_item_types = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_element_type_str));	// case fnon:listElementType eg math:product
+			if(list_item_types.length != 0){
+				const t: N3Type = extract_types(rdf_graph, list_item_types[0].object);
+				ret_n3 = {kind: "typedlist", list:null, type:t};
+				break;
+			}
+			break;
+		case xsd_integer_str: // if type is integer.
+			ret_n3 = {kind: "integer", num:null};
+			break;
+		case xsd_decimal_str:
+			ret_n3 = {kind: "decimal", num:null};
+			break;
+		case xsd_double_str:
+			ret_n3 = {kind: "double", num:null};
+			break;
+		case xsd_float_str:
+			ret_n3 = {kind: "float", num:null};
+			break;
+	}
+	return ret_n3;
 }
 
 // Extracts types for a given parameter from the RDF graph
@@ -320,33 +367,20 @@ function extract_types(rdf_graph:any, parameter: any): N3Type {
 	if (temp_type.length == 0) {
 		return ret_n3;
 	}
-	switch (rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_type_str))[0].object.value){
-		case rdf_list_str:	// if parameter is a list.
-			const list_item_types = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_element_type_str));	// case fnon:listElementType eg math:product
-			if(list_item_types.length == 0){
-				ret_n3={kind:"list", list:null};
-			} else {
-				const temp_list = list_item_types[0].object;
-				const the_list: N3Type[] = [];
-				temp_list.elements.forEach((item:any) =>{
-					const item_n3 = extract_types(rdf_graph, item);
-					the_list.push(item_n3);
-				});
-				ret_n3={kind:"list", list:the_list};
-			}
-			// TODO add case for fno_list_elements_str
-			const list_item_types_n = rdf_graph.statementsMatching(parameter, $rdf.namedNode(fno_list_elements_str));	// case fnon:listElements eg math:exponentiation
-			if(list_item_types.length == 0 || list_item_types.length == 1){
-				ret_n3={kind:"list", list:null};
-			} else {
-				const temp_list = list_item_types[1].object;
-				const the_list: N3Type[] = [];
-			}
-			break;
-		case xsd_integer_str: // if type is integer.
-			ret_n3 = {kind: "integer", num:null};
-			break;
-		// TODO: Add a case for unionOf		https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/math/sum.n3
+	const t_obj = temp_type[0].object;
+	if ($rdf.isNamedNode(t_obj)) {
+		ret_n3 = translate_type(rdf_graph, parameter, t_obj.value);
+	} else if ($rdf.isBlankNode(t_obj)) {
+		const union = rdf_graph.statementsMatching(t_obj, $rdf.namedNode(owl_union_str));
+		if(union.length==0)
+			return ret_n3;
+		const type_list:N3Type[]=[];
+		const type = union[0];
+		union[0].object.elements.forEach((type:any) =>{
+			const tr_type = translate_type(rdf_graph, union,type.value, false);
+			type_list.push(tr_type);
+		});
+		ret_n3={kind:`union`, types:type_list};
 	}
 	return ret_n3;
 }
@@ -358,7 +392,16 @@ function N3Type_to_str(to_print: N3Type) : string {
 		return "any";
 	switch (to_print.kind) {
 		case "list":
-			ret = "List( ";
+			ret = "list(";
+			if (to_print.list != null) {
+				to_print.list.forEach(element => {
+					ret+=N3Type_to_str(element)+" ";
+				});
+			}
+			ret += ")";
+			break;
+		case "typedlist":
+			ret = `list<`+ N3Type_to_str(to_print.type) +`>(`;
 			if (to_print.list != null) {
 				to_print.list.forEach(element => {
 					ret+=N3Type_to_str(element)+" ";
@@ -385,7 +428,14 @@ function N3Type_to_str(to_print: N3Type) : string {
 			ret = to_print.kind;
 			break;
 		case "triple":
-			ret = "<" + N3Type_to_str(to_print.subject) + " function " + N3Type_to_str(to_print.object) + ">";
+			ret = N3Type_to_str(to_print.subject) + " function " + N3Type_to_str(to_print.object);
+			break;
+		case "union":
+			ret = "union( ";
+			to_print.types.forEach((union_type) => {
+				ret+=union_type?.kind + " ";
+			});
+			ret+=")";
 			break;
 		default:
 			connection.console.warn(`Unknown type`);
