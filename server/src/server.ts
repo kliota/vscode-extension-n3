@@ -308,15 +308,17 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                 // Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
                 rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
 
-                const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
+                //const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
+				const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*?)\]/g;
                 let parameterMatch;
 
                 while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
                     const parameterBlock = parameterMatch[0];
 
                     // Check if the parameter is subject or object
-                    const positionRegex = /fnon:position\s+fnon:(\w+)/;
+                    const positionRegex = /fnon:position\s+fnon:(subject|object)/;
                     const positionMatch = positionRegex.exec(parameterBlock);
+					
                     const isSubject = positionMatch && positionMatch[1] === 'subject';
                     const isObject = positionMatch && positionMatch[1] === 'object';
 
@@ -344,7 +346,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
                         // Handle object types explicitly
                         if (isObject) {
-                            objectTypes.add(typeContent);  // Add any type (xsd:string, rdf:List, etc.) for the object
+                            objectTypes.add(typeContent); 
 
                             // Check for XSD-specific types within the object type
                             const typeXsdRegex = /xsd:[\w-]+/g;
@@ -412,17 +414,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 							//console.log(`Parsed union types for list element ${elementIndex}: ${unionTypes.join(", ")}`);
 							elementIndex++;
 						}
-					}					
-
-					// For multitype object lists such as o.1, o.2 etc.
-					/*while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-						const listBlock = match[2];
-
-						let typeMatch;
-						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-							subjectListElementTypes.push(typeMatch[1]);
-						}
-					}*/
+					}
 
                     // For multitype object lists such as o.1, o.2 etc.
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
@@ -477,8 +469,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
-	// After fnoTypes have been processed, add a log statement like this
-	//console.log("Captured fno:types:", Array.from(fnoTypes));
 
     return {
         xsdValues: Array.from(xsdValues),
