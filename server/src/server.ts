@@ -409,7 +409,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 							// Ensure union types are joined by ", " for consistency
 							const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);  // This filters out any empty strings
 							subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");  // Join union types with commas
-							console.log(`Parsed union types for list element ${elementIndex}: ${unionTypes.join(", ")}`);
+							//console.log(`Parsed union types for list element ${elementIndex}: ${unionTypes.join(", ")}`);
 							elementIndex++;
 						}
 					}					
@@ -929,12 +929,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										const expectedTypes = Array.isArray(expectedTypeString) ? expectedTypeString : expectedTypeString.split(", ");
 										//const expectedTypes = Array.isArray(subjectExpectedTypes[index]) ? subjectExpectedTypes[index] : [subjectExpectedTypes[index]];
 									
-										console.log(`List items: ${listItems.join(", ")}`);
 										// Log the current item, its expected types, and its actual value
-										console.log(`Comparing item ${index + 1}:`);
-										console.log(`  - Actual item: Type: ${item}, Value: ${actualValue}`);
-										console.log(`  - Expected type(s): ${expectedTypes.join(", ")}`);
-									
 								
 										// Extract variable names from the subject text
 										const variableMatch = subjectText.match(/\?[^\s()]+/g);
@@ -976,9 +971,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 										const itemXsdTypes = mapToXsdType(item); // Convert item to its XSD equivalents
 
-										// Log the mapped XSD types for the current item
-										console.log(`  - Mapped XSD types for item ${index + 1}: ${itemXsdTypes.join(", ")}`);
-									
 										// If the expected type is a union of types, check if the item matches any of the expected types
 										const isValidXsdType = itemXsdTypes.some((itemXsdType) => {
 											const isTypeValid = expectedTypes.includes(itemXsdType);
@@ -1009,32 +1001,27 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									const validItems = itemValidationResults.filter(result => result.isValid);
 									const invalidItems = itemValidationResults.filter(result => !result.isValid );  // Exclude variables from invalid items
 								
+									let message = `The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) `;
+
+									// Check for valid items and append the message
 									if (validItems.length > 0) {
 										const validItemMessages = validItems.map(item => {
 											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
 										});
-										connection.console.log(
-											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`match the expected xsd:type values. Valid items: ${validItems.map(item => `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`).join(", ")}.`
-										//connection.console.log(
-											//`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											//`include valid xsd:type values. Valid items: ${validItems.map(item => item.type).join(", ")}.`
-										);
+										message += `match the expected xsd:type values. Valid items: ${validItemMessages.join(", ")}. `;
 									}
-								
+									
+									// Check for invalid items and append the message
 									if (invalidItems.length > 0) {
 										const invalidItemMessages = invalidItems.map(item => {
 											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
 										});
-								
-										connection.console.log(
-											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`do not match the expected xsd:type values. Invalid items: ${invalidItemMessages.join(", ")}.`
-										);
-									} else {
-										connection.console.log(`The subject list items are valid.`);
+										message += `Invalid items: ${invalidItemMessages.join(", ")}.`;
 									}
-								
+									
+									// Log the final combined message
+									connection.console.log(message);
+
 									// Additional checks for element counts (if needed)
 									if (listElementInfo[0]?.subjectElementCount !== undefined) {
 										const expectedSubjectNumber = listElementInfo[0].subjectElementCount;
