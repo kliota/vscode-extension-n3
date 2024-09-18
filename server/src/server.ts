@@ -752,7 +752,24 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				return allTypesValid;
 			} 
 
-			
+			/**
+			 * Extracts the potential variable types for each variable.
+			 * @param text The variable text
+			 * @param variableTypes The list of possible variable types, Note it will change.
+			 * @param xsdValues The types of the arguments.
+			 * @returns True if the variable text got assigned a value
+			 */
+			function get_variable_types(text: string, variableTypes:Record<string, string>, xsdValues:string[]): boolean {
+				if(xsdValues.length == 0)
+					return false;
+				variableTypes[text]="";
+				xsdValues.forEach((type:string) => {
+					variableTypes[text] += `${type} `;
+				});
+				variableTypes[text] = variableTypes[text].slice(0, -1);
+				return true;
+			}
+
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
 				connection.console.log("Invalid context or missing elements in triple.");
@@ -843,24 +860,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									"log:Uri": "uri"  // URI mapping
 								};
 		
-								// If subject or object is a variable, store the expected type from fno:type (xsdValues)
-								if (subjectType === "variable") {
-									const expectedTypeForSubject = xsdValues.length > 0 ? xsdValues[0] : null;
-									if (expectedTypeForSubject) {
-										variableTypes[subjectText] = typeMapping[expectedTypeForSubject] || expectedTypeForSubject;
-										connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
-									}
+								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, xsdValues)) {
+									connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
 								}
 								
-								if (objectType === "variable") {
-									const expectedTypeForObject = xsdValues.length > 1 ? xsdValues[1] : xsdValues[0];
-									if (expectedTypeForObject) {
-										variableTypes[objectText] = typeMapping[expectedTypeForObject] || expectedTypeForObject;
-										connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
-									}
+								if (objectType === "variable" && get_variable_types(objectText, variableTypes, xsdValues)) {
+									connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
 								}
-								
-		
+
 								// Prepare the set of expected types
 								const expectedTypes = new Set<string>(xsdValues.map(type => typeMapping[type] || type));
 								
