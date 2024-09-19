@@ -425,10 +425,9 @@ async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: st
                         while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
                             objectListElementTypes.push(typeMatch[1]);
                         }
-						
                     }
 
-                    //Store list element types
+                    // Store list element types
                     if (subjectListElementTypes.length > 0) {
                         listInfo.subjectListElementTypes = subjectListElementTypes
                     }
