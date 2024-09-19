@@ -943,7 +943,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					const listElement = match[1].trim();
 					
 					items.push(listElement);
-					listItemTypes.push("Formula");
+					listItemTypes.push("formula");
 				}
 				
 				return [items, listItemTypes];
@@ -1168,8 +1168,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											}
 										} else if (expectedType.includes('xsd')) {
 											subjectExpectedTypes[index] = expectedType;  // Assign single XSD type
-										}else if (expectedType.startsWith('rdf:')) {
-											subjectExpectedTypes[index] = expectedType;  // Assign RDF type	
+										} else if (expectedType.startsWith('rdf:')) {
+											subjectExpectedTypes[index] = expectedType;  // Assign RDF and LOG type	
+										} else if (expectedType.startsWith('log:')) {
+											subjectExpectedTypes[index] = expectedType;  // Assign LOG type	
 										} else {
 											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
 										}
@@ -1220,9 +1222,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												value: actualValue
 											};
 										}
+
 										// If the expected type is a union of types, check if the item matches any of the expected types
-										
-										function mapToXsdType(itemType: string) {
+										// If the expected type is rdf:List or log:Formula, check if the item is list or formula
+										function mapToXsdRdfLogType(itemType: string) {
 											switch (itemType) {
 												case "float":
 													return ["xsd:float", "xsd:double", "xsd:decimal"];
@@ -1230,16 +1233,20 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 													return ["xsd:decimal"];
 												case "double":
 													return ["xsd:double"];
+												case "list":
+													return ["rdf:List"];
+												case "formula":
+													return ["log:Formula"];
 												default:
 													return [itemType];
 											}
 										}
 
-										const itemXsdTypes = mapToXsdType(item); // Convert item to its XSD equivalents
+										const itemXsdRdfLogTypes = mapToXsdRdfLogType(item); // Convert item to its XSD equivalents
 
 										// If the expected type is a union of types, check if the item matches any of the expected types
-										const isValidXsdType = itemXsdTypes.some((itemXsdType) => {
-											const isTypeValid = expectedTypes.includes(itemXsdType);
+										const isValidXsdType = itemXsdRdfLogTypes.some((itemXsdRdfLogType) => {
+											const isTypeValid = expectedTypes.includes(itemXsdRdfLogType);
 											//console.log(`    -> Comparing item XSD type "${itemXsdType}" with expected types "${expectedTypes.join(", ")}"`);
 											//console.log(`    -> Is this valid? ${isTypeValid ? "Yes" : "No"}`);
 											return isTypeValid;
@@ -1332,7 +1339,13 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								if (objectType === "list" || objectType === "listOfFormulas") {
 									let listItems:string[] = []; 
 									let items:string [] = [];
-									[items, listItems] = infer_list_item_types(objectText);
+									
+									if (objectType === "list") {
+										[items, listItems] = infer_list_item_types(objectText);
+									} else {
+										[items, listItems] = infer_list_of_formulas_item_types(objectText);
+									}
+									
 								
 									// Define expected types for each item in the object list, based on the extracted structure
 									const objectExpectedTypes: (string | undefined)[] = [];
