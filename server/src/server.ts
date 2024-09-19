@@ -989,6 +989,23 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				return allTypesValid;
 			} 
 
+			/**
+			 * Extracts the potential variable types for each variable.
+			 * @param text The variable text
+			 * @param variableTypes The list of possible variable types, Note it will change.
+			 * @param xsdValues The types of the arguments.
+			 * @returns True if the variable text got assigned a value
+			 */
+			function get_variable_types(text: string, variableTypes:Record<string, string>, xsdValues:string[]): boolean {
+				if(xsdValues.length == 0)
+					return false;
+				variableTypes[text]="";
+				xsdValues.forEach((type:string) => {
+					variableTypes[text] += `${type} `;
+				});
+				variableTypes[text] = variableTypes[text].slice(0, -1);
+				return true;
+			}
 			
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
@@ -1086,21 +1103,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									"log:Uri": "uri"  // URI mapping
 								};
 		
-								// If subject or object is a variable, store the expected type from fno:type (xsdValues)
-								if (subjectType === "variable") {
-									const expectedTypeForSubject = xsdValues.length > 0 ? xsdValues[0] : null;
-									if (expectedTypeForSubject) {
-										variableTypes[subjectText] = typeMapping[expectedTypeForSubject] || expectedTypeForSubject;
-										connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
-									}
+								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, xsdValues)) {
+									connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
 								}
 								
-								if (objectType === "variable") {
-									const expectedTypeForObject = xsdValues.length > 1 ? xsdValues[1] : xsdValues[0];
-									if (expectedTypeForObject) {
-										variableTypes[objectText] = typeMapping[expectedTypeForObject] || expectedTypeForObject;
-										connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
-									}
+								if (objectType === "variable" && get_variable_types(objectText, variableTypes, xsdValues)) {
+									connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
 								}
 								
 		
@@ -1141,7 +1149,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									}
 								
 									// Initialize expected types for the subject list items
-									const subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
+									//const subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
+									let subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
+									
+									// Log the full listElementInfo to see if it's being populated
+									//connection.console.log(`listElementInfo: ${JSON.stringify(listElementInfo, null, 2)}`);
 
 									// Dynamically extract expected types from listElementInfo for subject
 									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
@@ -1156,9 +1168,13 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											}
 										} else if (expectedType.includes('xsd')) {
 											subjectExpectedTypes[index] = expectedType;  // Assign single XSD type
+										}else if (expectedType.startsWith('rdf:')) {
+											subjectExpectedTypes[index] = expectedType;  // Assign RDF type	
 										} else {
 											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
 										}
+
+										//connection.console.log(`Extracted expected type for index ${index}: ${subjectExpectedTypes[index]}`);
 									});
 									
 									// Log the final `subjectExpectedTypes` array
@@ -1168,6 +1184,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									if (listElementInfo[0]?.subjectListElementTypes?.length === 1) {
 										for (let i = 0; i < listItems.length; i++) {
 											subjectExpectedTypes[i] = subjectExpectedTypes[0];  // Apply the same type to all list elements
+											//connection.console.log(`Extracted expected type for index ${i}: ${subjectExpectedTypes[i]}`);
 										}
 									}
 								
@@ -1179,8 +1196,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										// Split expectedTypeString into an array if it's a string of multiple types
 										const expectedTypes = Array.isArray(expectedTypeString) ? expectedTypeString : expectedTypeString.split(", ");
 										//const expectedTypes = Array.isArray(subjectExpectedTypes[index]) ? subjectExpectedTypes[index] : [subjectExpectedTypes[index]];
-									
-										// Log the current item, its expected types, and its actual value
 								
 										// Extract variable names from the subject text
 										const variableMatch = subjectText.match(/\?[^\s()]+/g);
@@ -1197,7 +1212,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 
 										if (item === "variable") {
-											console.log(`    -> Item "${item}" is a variable and is automatically valid.`);
+											//console.log(`    -> Item "${item}" is a variable and is automatically valid.`);
 											return {
 												type: item,
 												expectedType: expectedTypes.join(", "),
