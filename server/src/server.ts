@@ -338,8 +338,6 @@ async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: st
                         // Handle subject types explicitly
                         if (isSubject) {
                             subjectTypes.add(typeContent);  // Add any type (log:Uri, rdf:List, etc.) for the subject
-							// Log the typeContent for both subject and object types
-    						//console.log(`Extracted typeContent: ${typeContent}`);
 
                             // Check for XSD-specific types within the subject type
                             const typeXsdRegex = /xsd:[\w-]+/g;
@@ -365,10 +363,6 @@ async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: st
                             }
                         }
                     }
-
-                    // Create an entry to store separate subject and object counts and types
-                    //const listInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] } = {};
-
                     // Check whether the list has fixed number of elements for subject or object
                     const subjectElementCountRegex = /fno:predicate\s+"\$s\.(\d+)"/g;
                     const objectElementCountRegex = /fno:predicate\s+"\$o\.(\d+)"/g;
@@ -423,17 +417,6 @@ async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: st
 							elementIndex++;
 						}
 					}					
-
-					// For multitype object lists such as o.1, o.2 etc.
-					/*while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-						const listBlock = match[2];
-
-						let typeMatch;
-						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-							subjectListElementTypes.push(typeMatch[1]);
-						}
-					}*/
-
                     // For multitype object lists such as o.1, o.2 etc.
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
                         const listBlock = match[2];
@@ -488,11 +471,6 @@ async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: st
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
-	// After fnoTypes have been processed, add a log statement like this
-	//console.log("Captured fno:types:", Array.from(fnoTypes));
-	//console.log("Captured subject types:", Array.from(subjectTypes));
-	//console.log("Captured object types", Array.from(objectTypes));
-	//console.log("listElementInfo: "listElementInfo) ;
     return {
         xsdValues: Array.from(xsdValues),
         fnoTypes: Array.from(fnoTypes),
@@ -595,7 +573,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
                     // **New Condition**: Apply simpleTypeRegex only if neither `listElements` nor `listElementType` exists
                     if (!hasListElementsOrType) {
-                        console.log(`Applying simpleTypeRegex for block: ${parameterBlock}`);
                         // Apply simple type regex to capture subject and object types separately
                         while ((simpleTypeMatch = simpleTypeRegex.exec(parameterBlock)) !== null) {
                             const position = simpleTypeMatch[1]; // 's' for subject, 'o' for object
@@ -604,15 +581,13 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
                             if (position === 'subject') {
                                 subjectTypes.add(type);
-								//console.log(`Added subject type: ${type}`);
-								
+								//console.log(`Added subject type: ${type}`);						
                             } else if (position === 'object') {
                                 objectTypes.add(type);
 								//console.log(`Added object type: ${type}`);
                             }
                         }
                     }
-
 
                     // Count the number of subject list elements
                     const subjectElementCountRegex = /fno:predicate\s+"\$s\.(\d+)"/g;
@@ -690,18 +665,33 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     if (subjectListElementTypes.length > 0) {
                         listInfo.subjectListElementTypes = subjectListElementTypes;
                     }
-
                     // Store list element types for object
                     if (objectListElementTypes.length > 0) {
                         listInfo.objectListElementTypes = objectListElementTypes;
                     }
+					// Capture owl:unionOf content for both subject and object types
 
+					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
+					const unionOfMatch = unionOfRegex.exec(parameterBlock);
+					if (unionOfMatch) {
+						const unionOfContent = unionOfMatch[1];
+						// Extract XSD types from unionOf for subject or object
+						const unionOfXsdRegex = /xsd:[\w-]+/g;
+						let unionOfXsdMatch;
+						while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
+							xsdValues.add(unionOfXsdMatch[0]);
+							if (isSubject) {
+								subjectTypes.add(unionOfXsdMatch[0]);
+							} else if (isObject) {
+								objectTypes.add(unionOfXsdMatch[0]);
+							}
+						}
+					}
                     // Only push if we have some information about subject or object
                     if (listInfo.subjectElementCount || listInfo.objectElementCount || listInfo.subjectListElementTypes || listInfo.objectListElementTypes) {
                         listElementInfo.push(listInfo);
                     }
                 }
-
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
@@ -712,11 +702,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
         console.error('Error fetching RDF data:', error);
     }
 
-    // Log captured types
-    //console.log("Captured fno:types:", Array.from(fnoTypes));
-    //console.log("Captured subject types:", Array.from(subjectTypes));
-    //console.log("Captured object types", Array.from(objectTypes));
-
     return {
         xsdValues: Array.from(xsdValues),
         fnoTypes: Array.from(fnoTypes),
@@ -725,9 +710,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
         listElementInfo
     };
 }
-
-
-
 
 
 // Function to determine if the error is an Axios error
@@ -1168,7 +1150,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									});
 									
 									// Log the final `subjectExpectedTypes` array
-									connection.console.log(`Final subject expected types: ${subjectExpectedTypes}`);
+									//connection.console.log(`Final subject expected types: ${subjectExpectedTypes}`);
 																										
 									// Ensure all list elements get the same expected type if the function specifies a single type for the list
 									if (listElementInfo[0]?.subjectListElementTypes?.length === 1) {
