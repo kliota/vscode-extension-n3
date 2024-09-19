@@ -936,14 +936,20 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				const items: string[] = [];
 				const listItemTypes: string[] = [];
 
-				const listOfFormularRegex = /{([^{}]*(?:{[^{}]*}[^{}]*)*)}/g;
+				const outerBracesRegex = /{([^{}]*)}/gs;  // Matches everything inside outermost curly braces
+				const formulaRegex = /(\S+.*?\.\s*)/gs;   // Matches each individual formula
+				
 				let match;
+				let formulaMatch;
+				
+				while ((match = outerBracesRegex.exec(listValue)) !== null) {
+					let insideBraces = match[1]; 
 
-				while ((match = listOfFormularRegex.exec(listValue)) !== null) {
-					const listElement = match[1].trim();
-					
-					items.push(listElement);
-					listItemTypes.push("formula");
+					while ((formulaMatch = formulaRegex.exec(insideBraces)) !== null) {
+						const listElement = formulaMatch[1].trim();
+						items.push(listElement);
+						listItemTypes.push("formula");
+					}
 				}
 				
 				return [items, listItemTypes];
