@@ -803,6 +803,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 	let hasSyntaxError = false;  // Syntax error flag
 
+	let variablesMap = new Map();  // Map for collecting declared variables' types
+
 	n3.parse(text, {
 		syntaxError: function (
 			recognizer: any,
@@ -1036,6 +1038,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					variableTypes[text] += `${type} `;
 				});
 				variableTypes[text] = variableTypes[text].slice(0, -1);
+				
+				// If the variable was not declared before, add it and its type into variablesMap
+				if (variablesMap.get(text) === undefined) {
+					variablesMap.set(text, variableTypes[text]);
+				}
 				return true;
 			}
 			
@@ -1149,11 +1156,28 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								};
 		
 								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, xsdValues)) {
-									connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
+									let varCurrentType = variablesMap.get(subjectText);
+									let varExpectedType = variableTypes[subjectText];
+									if (varCurrentType !== undefined && varCurrentType !== varExpectedType) {
+										connection.console.warn(
+											`The variable "${subjectText}" was previously declared as "${varCurrentType}". The expected type is "${varExpectedType}".`
+										);
+									} else {
+										connection.console.log(`The variable "${subjectText}" has an expected type of "${variableTypes[subjectText]}".`);
+									}
 								}
 								
 								if (objectType === "variable" && get_variable_types(objectText, variableTypes, xsdValues)) {
-									connection.console.log(`The variable "${objectText}" has an expected type of "${variableTypes[objectText]}".`);
+									let varCurrentType = variablesMap.get(objectText);
+									let varExpectedType = variableTypes[objectText];
+									// if the variable was declared before AND if the declared type is not the same as expected type
+									if (varCurrentType !== undefined && varCurrentType !== varExpectedType) {
+										connection.console.warn(
+											`The variable "${objectText}" was previously declared as "${varCurrentType}". The expected type is "${varExpectedType}".`
+										);
+									} else {
+										connection.console.log(`The variable "${objectText}" has an expected type of "${varExpectedType}".`);
+									}
 								}
 								
 		
@@ -1214,7 +1238,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										} else if (expectedType.includes('xsd')) {
 											subjectExpectedTypes[index] = expectedType;  // Assign single XSD type
 										} else if (expectedType.startsWith('rdf:')) {
-											subjectExpectedTypes[index] = expectedType;  // Assign RDF and LOG type	
+											subjectExpectedTypes[index] = expectedType;  // Assign RDF type	
 										} else if (expectedType.startsWith('log:')) {
 											subjectExpectedTypes[index] = expectedType;  // Assign LOG type	
 										} else {
@@ -1249,10 +1273,18 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 										if (variableMatch) {
 											variableMatch.forEach((variableName, i) => {
-												const varExpectedType = subjectExpectedTypes[i] || "undefined";
 												// Log only if this variable hasn't been logged yet
 												if (!loggedVariables.has(variableName)) {
-													connection.console.log(`The variable "${variableName}" is of expected type "${varExpectedType}"`);
+													get_variable_types(variableName, variableTypes, xsdValues);
+													const varExpectedType = variableTypes[variableName] || "undefined";
+													let varCurrentType = variablesMap.get(variableName);
+													if (varCurrentType !== undefined && varCurrentType !== varExpectedType) {
+														connection.console.warn(
+															`The variable "${variableName}" was previously declared as "${varCurrentType}". The expected type is "${varExpectedType}".`
+														);
+													} else {
+														connection.console.log(`The variable "${variableName}" is of expected type "${varExpectedType}"`);
+													}
 													loggedVariables.add(variableName);  // Mark this variable as logged
 												}
 											});
@@ -1453,8 +1485,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										const expectedObjectNumber = listElementInfo[0].objectElementCount;
 										const objectItemNumber = validItems.length + invalidItems.length;
 										if (objectItemNumber !== expectedObjectNumber) {
-											connection.console.log(
-												`Error: Object list's element number does not match with the expected number of elements:\n` +
+											connection.console.warn(
+												`Object list's element number does not match with the expected number of elements:\n` +
 												`\tExpected element number is ${expectedObjectNumber}, current number is ${objectItemNumber}`
 											);
 										} else {
