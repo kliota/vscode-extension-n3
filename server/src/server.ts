@@ -626,26 +626,45 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     }
 
                     // Handle multitype subject lists (e.g., s.1, s.2)
-                    while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        const listBlock = match[2]; // the full content of `fnon:listElements`
-                        
-                        let typeMatch: RegExpExecArray | null;
-                        let elementIndex = 1;
-                        
-                        // Handle owl:unionOf types if present
-                        if (listBlock.includes('owl:unionOf')) {
-                            while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-                                const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
-                                subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
-                                elementIndex++;
-                            }
-                        } else {
-                            // When there's no owl:unionOf, push directly from subjectTypes
-                            subjectTypes.forEach(type => {
-                                subjectListElementTypes.push(type);
-                            });
-                        }
-                    }
+
+					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
+						const listBlock = match[2]; // the full content of `fnon:listElements`
+						console.log("Entering multitype list element block with listBlock:", listBlock);
+					
+						let typeMatch: RegExpExecArray | null;
+						let elementIndex = 1;
+					
+						// Handle owl:unionOf types if present
+						if (listBlock.includes('owl:unionOf')) {
+							console.log("owl:unionOf detected in listBlock.");
+							while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
+								const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
+								console.log("Extracted union types:", unionTypes);
+								subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
+								elementIndex++;
+							}
+						} else {
+							// When there's no owl:unionOf, capture list element types using fnon:position
+							console.log("owl:unionOf not detected, handling regular list elements by position.");
+							
+							const typeCaptureRegex = /fno:type\s+(xsd:\w+|rdf:\w+)/g;
+							let typeMatch: RegExpExecArray | null;
+					
+							while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
+								const listElementType = typeMatch[1]; // Capture the type (xsd:string, xsd:float, etc.)
+								console.log(`Extracted list element type: ${listElementType}`);
+								//subjectListElementTypes.push(listElementType); // Add the extracted type to the array
+								//elementIndex++; // Move to next element
+
+								// Assign type to the matched list element ($s.1, $s.2, etc.)
+								subjectListElementTypes[elementIndex - 1] = listElementType;
+								elementIndex++; // Move to next element
+								
+							}
+						}
+											//console.log("Final subjectListElementTypes:", subjectListElementTypes);
+					}					
+					
 
                     // Handle multitype object lists (e.g., o.1, o.2)
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
@@ -658,11 +677,13 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                             objectListElementTypes[elementIndex - 1] = typeMatch[1];
                             elementIndex++;
                         }
+						console.log("Final subjectListElementTypes:", objectListElementTypes);
                     }
 
                     // Store list element types for subject
                     if (subjectListElementTypes.length > 0) {
                         listInfo.subjectListElementTypes = subjectListElementTypes;
+						//connection.console.log(` subject expected types: ${subjectListElementTypes}`);
                     }
                     // Store list element types for object
                     if (objectListElementTypes.length > 0) {
@@ -700,6 +721,12 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
+
+	// After fnoTypes have been processed, add a log statement like this
+	//console.log("Captured fno:types:", Array.from(fnoTypes));
+	//console.log("Captured subject types:", Array.from(subjectTypes));
+	//console.log("Captured object types", Array.from(objectTypes));
+	//console.log("listElementInfo: "listElementInfo) 
 
     return {
         xsdValues: Array.from(xsdValues),
@@ -1177,7 +1204,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 									// Dynamically extract expected types from listElementInfo for subject
 									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
-										expectedType = expectedType.trim();
+										expectedType = expectedType.trim()|| "undefined";;
 									
 										if (expectedType.includes('owl:unionOf')) {
 											// Parse the union types from the expected type
