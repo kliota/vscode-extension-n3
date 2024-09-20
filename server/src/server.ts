@@ -627,30 +627,30 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
 					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
 						const listBlock = match[2]; // the full content of `fnon:listElements`
-						console.log("Entering multitype list element block with listBlock:", listBlock);
+						//console.log("Entering multitype list element block with listBlock:", listBlock);
 					
 						let typeMatch: RegExpExecArray | null;
 						let elementIndex = 1;
 					
 						// Handle owl:unionOf types if present
 						if (listBlock.includes('owl:unionOf')) {
-							console.log("owl:unionOf detected in listBlock.");
+							//console.log("owl:unionOf detected in listBlock.");
 							while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
 								const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
-								console.log("Extracted union types:", unionTypes);
+								//console.log("Extracted union types:", unionTypes);
 								subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
 								elementIndex++;
 							}
 						} else {
 							// When there's no owl:unionOf, capture list element types using fnon:position
-							console.log("owl:unionOf not detected, handling regular list elements by position.");
+							//console.log("owl:unionOf not detected, handling regular list elements by position.");
 							
 							const typeCaptureRegex = /fno:type\s+(xsd:\w+|rdf:\w+)/g;
 							let typeMatch: RegExpExecArray | null;
 					
 							while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
 								const listElementType = typeMatch[1]; // Capture the type (xsd:string, xsd:float, etc.)
-								console.log(`Extracted list element type: ${listElementType}`);
+								//console.log(`Extracted list element type: ${listElementType}`);
 								//subjectListElementTypes.push(listElementType); // Add the extracted type to the array
 								//elementIndex++; // Move to next element
 
@@ -660,7 +660,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 								
 							}
 						}
-											//console.log("Final subjectListElementTypes:", subjectListElementTypes);
+						//console.log("Final subjectListElementTypes:", subjectListElementTypes);
 					}					
 					
 
@@ -675,7 +675,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                             objectListElementTypes[elementIndex - 1] = typeMatch[1];
                             elementIndex++;
                         }
-						console.log("Final subjectListElementTypes:", objectListElementTypes);
+						//console.log("Final objectListElementTypes:", objectListElementTypes);
                     }
 
                     // Store list element types for subject
