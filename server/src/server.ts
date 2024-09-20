@@ -276,8 +276,6 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
         const exists = builtIns.get(prefix)!.has(func);
         if (exists) {
             return true;
-        } else {
-            console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
         }
     } else if (prefix !== "") {
         console.log(`No functions found for prefix "${prefix}".`);
