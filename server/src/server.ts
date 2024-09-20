@@ -305,8 +305,8 @@ async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: st
             const jsonData = JSON.parse(jsonMatch[1]);
             rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
             if (rdfData) {
-                // Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
-                rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
+				// Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
+				rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
 
                 const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
                 let parameterMatch;
@@ -716,7 +716,7 @@ function isAxiosError(error: unknown): error is AxiosError {
     return (error as AxiosError).isAxiosError !== undefined;
 }
 
-async function generateAndLaunchURL(prefix: string, func: string): Promise<void> {
+async function generateAndLaunchURL(prefix: string, func: string): Promise<{ success: boolean, message: string }> {
     // Generate the path based on the prefix and func
     const path = `${prefix}/${func}.n3`;
 
@@ -732,15 +732,16 @@ async function generateAndLaunchURL(prefix: string, func: string): Promise<void>
 
         // If the HEAD request is successful, proceed to fetch and extract parameters
         await fetchAndExtractParameters(url);
+		return { success: true, message: 'Parameters are fetched and extracted successfully' };
     } catch (error) {
         if (isAxiosError(error)) {  // Type guard for Axios error
             if (error.response && error.response.status === 404) {
-                console.error('Error: The URL does not exist (404 Not Found)');
+                return { success: false, message: 'Error: The URL does not exist (404 Not Found)' };
             } else {
-                console.error('Error: Unable to reach the URL or another issue occurred', error.message);
+                return { success: false, message: `Error: Unable to reach the URL or another issue occurred: ${error.message}` };
             }
         } else {
-            console.error('An unknown error occurred', error);
+            return { success: false, message: `An unknown error occurred: ${error}` };
         }
     }
 }
@@ -1077,24 +1078,37 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			connection.console.log(output);
 		
 			const verbText = ctx_text(verb);
-			// Handle special cases for '=>' and '<='
-			if (verbText === '=>' || verbText === '<=') {
+			
+			let [prefix, func] = new Array<string>(2);
+
+			if (verbText.includes(':')) {
+				[prefix, func] = verbText.split(':');
+			} else if (verbText === '=>' || verbText === '<=') {  // Handle special cases for '=>' and '<='
 				const correspondingFunction = verbText === '=>' ? 'log:implies' : 'log:impliedBy';
 				connection.console.log(`The verb "${verbText}" is recognized as a shorthand for "${correspondingFunction}".`);
+				[prefix, func] = correspondingFunction.split(':');
 				// Handle the logic as needed for these cases, no need for prefix validation
-			} else if (!verbText.includes(':')) {
+			} else {
 				connection.console.log("Invalid verb format; missing prefix and function.");
 				return;
 			}
-		
-			const [prefix, func] = verbText.split(':');
 		
 			if (subjectText && verbText && objectText) {
 				checkFunctionInPrefix(prefix, func).then(functionExists => {
 					if (functionExists) {
 						connection.console.log(`The function "${func}" exists in the prefix "${prefix}".`);
 		
-						generateAndLaunchURL(prefix, func).then(async () => {
+						generateAndLaunchURL(prefix, func).then(async (result) => {
+							if (!result.success) {
+								if (result.message === "Error: The URL does not exist (404 Not Found)") {
+									connection.console.log(`Specifications for "${prefix}:${func}" are not given on GitHub [${result.message}]`);
+								} else {
+									//connection.console.error(result.message);
+									console.error(result.message);
+								}
+                                
+                                return;  // Halt the validateTextDocument function
+                            }
 							if (!hasSyntaxError) {  // Only compare types if no syntax error occurred
 								const { fnoTypes, xsdValues, subjectTypes, objectTypes, listElementInfo } = await fetchAndExtractParameters(`https://github.com/w3c-cg/n3Builtins/blob/main/spec/src/${prefix}/${func}.n3`);
 		
