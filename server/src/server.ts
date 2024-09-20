@@ -279,7 +279,7 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
         } else {
             console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
         }
-    } else {
+    } else if (prefix !== "") {
         console.log(`No functions found for prefix "${prefix}".`);
     }
     return false;
@@ -1471,7 +1471,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								connection.console.log("Skipping type comparison due to syntax error.");
 							}
 						});
-					} else {
+					} else if (prefix !== "") {
 						connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
 					}
 				});
