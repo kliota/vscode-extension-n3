@@ -1013,7 +1013,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 						}
 					} else if (!expectedTypes.has(type)) {
 						// Literal type does not match any of the expected types
-						connection.console.log(`Literal type ${type} does not match expected xsd types: ${Array.from(expectedTypes).join(", ")}.`);
+						connection.console.warn(`Literal type ${type} does not match expected xsd types: ${Array.from(expectedTypes).join(", ")}.`);
 						allTypesValid = false;
 					}
 				}
@@ -1041,7 +1041,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
-				connection.console.log("Invalid context or missing elements in triple.");
+				connection.console.warn("Invalid context or missing elements in triple.");
 				return;
 			}
 		
@@ -1050,7 +1050,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		
 			// Check if predicateObjectList has the required children
 			if (!predicateObjectList.children || predicateObjectList.children.length < 2) {
-				connection.console.log("Invalid predicate-object list in triple.");
+				connection.console.warn("Invalid predicate-object list in triple.");
 				return;
 			}
 		
@@ -1059,7 +1059,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 		
 			// Check if objectList has at least one child
 			if (!objectList.children || objectList.children.length === 0) {
-				connection.console.log("Invalid object list in triple.");
+				connection.console.warn("Invalid object list in triple.");
 				return;
 			}
 		
@@ -1114,7 +1114,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				[prefix, func] = correspondingFunction.split(':');
 				// Handle the logic as needed for these cases, no need for prefix validation
 			} else {
-				connection.console.log("Invalid verb format; missing prefix and function.");
+				connection.console.warn("Invalid verb format; missing prefix and function.");
 				return;
 			}
 		
@@ -1175,7 +1175,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 								if (!subjectTypeMatched) {
 									for (const fnoType of subjectTypes) {
-										connection.console.log(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
+										connection.console.warn(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
 
@@ -1329,23 +1329,26 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										message += `match the expected xsd:type values. Valid items: ${validItemMessages.join(", ")}. `;
 									}
 									
-									// Check for invalid items and append the message
+									// Check for invalid items and print a warning instead of appending to the message
 									if (invalidItems.length > 0) {
 										const invalidItemMessages = invalidItems.map(item => {
 											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
 										});
-										message += `Invalid items: ${invalidItemMessages.join(", ")}.`;
+										
+										// Print a warning specifically for the invalid items
+										connection.console.warn(`Invalid items detected: ${invalidItemMessages.join(", ")}.`);
 									}
 									
-									// Log the final combined message
+									// Log the final message only for valid items (if any)
 									connection.console.log(message);
+									
 
 									// Additional checks for element counts (if needed)
 									if (listElementInfo[0]?.subjectElementCount !== undefined) {
 										const expectedSubjectNumber = listElementInfo[0].subjectElementCount;
 										const subjectItemNumber = validItems.length + invalidItems.length;
 										if (subjectItemNumber !== expectedSubjectNumber) {
-											connection.console.log(`Error: Subject list's element number does not match the expected number of elements:\n` +
+											connection.console.warn(`Subject list's element number does not match the expected number of elements:\n` +
 												`\tExpected element number is ${expectedSubjectNumber}, current number is ${subjectItemNumber}`);
 										} else {
 											connection.console.log(`Subject list's element number matches the expected number of elements.`);
@@ -1372,7 +1375,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								// Log a message if no match is found for the object type
 								if (!objectTypeMatched) {
 									for (const fnoType of objectTypes) {
-										connection.console.log(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
+										connection.console.warn(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
 								
@@ -1442,7 +1445,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									}
 								
 									if (invalidItems.length > 0) {
-										connection.console.log(
+										connection.console.warn(
 											`The list item datatypes of object "${objectText}" (list item types: ${listItems.join(", ")}) ` +
 											`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${objectText.split(/[()]/)[1].split(" ")[index]} (expected: ${item.expectedType})`).join(", ")}.`
 										);
@@ -1453,7 +1456,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										const expectedObjectNumber = listElementInfo[0].objectElementCount;
 										const objectItemNumber = validItems.length + invalidItems.length;
 										if (objectItemNumber !== expectedObjectNumber) {
-											connection.console.log(
+											connection.console.warn(
 												`Error: Object list's element number does not match with the expected number of elements:\n` +
 												`\tExpected element number is ${expectedObjectNumber}, current number is ${objectItemNumber}`
 											);
@@ -1470,7 +1473,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 							}
 						});
 					} else if (prefix !== "") {
-						connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+						connection.console.warn(`The function "${func}" does not exist in the prefix "${prefix}".`);
 						
 						// Check for misspelling (only for uppercase mistake in one-word functions)
 						let correctFunc = "";
@@ -1482,7 +1485,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 					}
 				});
 			} else {
-				connection.console.log("The input is not a valid triple.");
+				connection.console.warn("The input is not a valid triple.");
 			}
 		},		
 						
