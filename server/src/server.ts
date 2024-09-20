@@ -1471,6 +1471,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 						});
 					} else if (prefix !== "") {
 						connection.console.log(`The function "${func}" does not exist in the prefix "${prefix}".`);
+						
+						// Check for misspelling (only for uppercase mistake in one-word functions)
+						let correctFunc = "";
+						checkFunctionInPrefix(prefix, correctFunc=func.toLowerCase()).then(functionExists => {
+							if (functionExists) {
+								connection.console.log(`\tDid you mean "${correctFunc}" instead of "${func}"?`);
+							}
+						});
 					}
 				});
 			} else {
