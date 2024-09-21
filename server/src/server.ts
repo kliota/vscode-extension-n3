@@ -282,200 +282,6 @@ async function checkFunctionInPrefix(prefix: string, func: string): Promise<bool
     return false;
 }
 
-
-async function fetchAndExtractParametersss(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[], listElementInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] }[] }> {
-    const xsdValues: Set<string> = new Set();
-    const fnoTypes: Set<string> = new Set();
-    const subjectTypes: Set<string> = new Set();
-    const objectTypes: Set<string> = new Set();
-    const listElementInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] }[] = [];
-
-    try {
-        const response = await axios.get(url);
-        let rdfData = response.data;
-
-        // Extract JSON data from the script tag
-        const jsonRegex = /<script type="application\/json" data-target="react-app\.embeddedData">({.*?})<\/script>/;
-        const jsonMatch = rdfData.match(jsonRegex);
-
-        if (jsonMatch) {
-            const jsonData = JSON.parse(jsonMatch[1]);
-            rdfData = jsonData?.payload?.blob?.rawLines?.join('\n');
-            if (rdfData) {
-				// Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
-				rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
-
-                const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
-                let parameterMatch;
-
-                while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
-                    const parameterBlock = parameterMatch[0];
-
-                    // Create an entry to store separate subject and object counts and types
-                    const listInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] } = {};
-					// Check if the parameter is subject or object
-                    const positionRegex = /fnon:position\s+fnon:(\w+)/;
-                    const positionMatch = positionRegex.exec(parameterBlock);
-                    const isSubject = positionMatch && positionMatch[1] === 'subject';
-                    const isObject = positionMatch && positionMatch[1] === 'object';
-
-                    // Capture fno:type for either subject or object
-                    const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
-                    let typeMatch;
-
-					const subjectListElementTypes: string[] = [];
-                    const objectListElementTypes: string[] = [];
-
-                    while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
-                        const typeContent = typeMatch[1].trim();
-
-                        // Add fno:type globally
-                        fnoTypes.add(typeContent);
-
-                        // Handle subject types explicitly
-                        if (isSubject) {
-                            subjectTypes.add(typeContent);  // Add any type (log:Uri, rdf:List, etc.) for the subject
-
-                            // Check for XSD-specific types within the subject type
-                            const typeXsdRegex = /xsd:[\w-]+/g;
-                            let typeXsdMatch;
-                            while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
-                                xsdValues.add(typeXsdMatch[0]);
-                                subjectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the subject
-								subjectListElementTypes.push(typeContent);
-                            }
-
-                        }
-
-                        // Handle object types explicitly
-                        if (isObject) {
-                            objectTypes.add(typeContent);  // Add any type (xsd:string, rdf:List, etc.) for the object
-
-                            // Check for XSD-specific types within the object type
-                            const typeXsdRegex = /xsd:[\w-]+/g;
-                            let typeXsdMatch;
-                            while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
-                                xsdValues.add(typeXsdMatch[0]);
-                                objectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the object
-                            }
-                        }
-                    }
-                    // Check whether the list has fixed number of elements for subject or object
-                    const subjectElementCountRegex = /fno:predicate\s+"\$s\.(\d+)"/g;
-                    const objectElementCountRegex = /fno:predicate\s+"\$o\.(\d+)"/g;
-                    let subjectElementCount = 0;
-                    let objectElementCount = 0;
-                    let match;
-
-                    // Count the number of subject list elements
-                    while ((match = subjectElementCountRegex.exec(parameterBlock)) !== null) {
-                        subjectElementCount = Math.max(subjectElementCount, parseInt(match[1]));
-                    }
-                    if (subjectElementCount > 0) {
-                        listInfo.subjectElementCount = subjectElementCount;
-                    }
-
-                    // Count the number of object list elements
-                    while ((match = objectElementCountRegex.exec(parameterBlock)) !== null) {
-                        objectElementCount = Math.max(objectElementCount, parseInt(match[1]));
-                    }
-                    if (objectElementCount > 0) {
-                        listInfo.objectElementCount = objectElementCount;
-                    }
-
-                    // Collect types of list elements for both Subject and Object
-                    const monotypeListElementTypeRegex = /fnon:listElementType\s*\[\s*([\s\S]*?)fno:type\s*([\s\S]*)\s*\]\s*\]/g;
-                    const subjectMultitypeListElementTypeRegex = /\$s([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)([\s\S]*?)\$o/g;
-                    const objectMultitypeListElementTypeRegex = /\$o([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
-                    const typeCaptureRegex = /fno:type\s*([\w:]+)/g;
-					const typeCaptureRegexSubject = /fno:type\s*\[\s*rdf:type\s*rdfs:Datatype\s*;\s*owl:unionOf\s*\((.*?)\)\s*\]/g;
-					
-                    //const subjectListElementTypes: string[] = [];
-                    //const objectListElementTypes: string[] = [];
-
-                    // For monotype subject lists
-                    while ((match = monotypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        subjectListElementTypes.push(match[2]);					
-                    }
-
-                    // For multitype subject lists such as s.1, s.2 etc.
-					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-						const listBlock = match[2]; // the full content of `fnon:listElements`
-					
-						let typeMatch;
-						let elementIndex = 1;
-						
-						// This loop processes each owl:unionOf block
-						while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-							// Ensure union types are joined by ", " for consistency
-							const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);  // This filters out any empty strings
-							subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");  // Join union types with commas
-							//console.log(`Parsed union types for list element ${elementIndex}: ${unionTypes.join(", ")}`);
-							elementIndex++;
-						}
-					}					
-                    // For multitype object lists such as o.1, o.2 etc.
-                    while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        const listBlock = match[2];
-
-                        let typeMatch;
-                        while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
-                            objectListElementTypes.push(typeMatch[1]);
-                        }
-                    }
-
-                    // Store list element types
-                    if (subjectListElementTypes.length > 0) {
-                        listInfo.subjectListElementTypes = subjectListElementTypes
-                    }
-
-                    if (objectListElementTypes.length > 0) {
-                        listInfo.objectListElementTypes = objectListElementTypes;
-                    }
-
-					// Capture owl:unionOf content for both subject and object types
-					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
-					const unionOfMatch = unionOfRegex.exec(parameterBlock);
-					if (unionOfMatch) {
-						const unionOfContent = unionOfMatch[1];
-
-						// Extract XSD types from unionOf for subject or object
-						const unionOfXsdRegex = /xsd:[\w-]+/g;
-						let unionOfXsdMatch;
-						while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
-							xsdValues.add(unionOfXsdMatch[0]);
-
-							if (isSubject) {
-								subjectTypes.add(unionOfXsdMatch[0]);
-							} else if (isObject) {
-								objectTypes.add(unionOfXsdMatch[0]);
-							}
-						}
-					}
-                    // Only push if we have some information about subject or object
-                    if (listInfo.subjectElementCount || listInfo.objectElementCount || listInfo.subjectListElementTypes || listInfo.objectListElementTypes) {
-                        listElementInfo.push(listInfo);
-                    }
-                }
-
-            } else {
-                console.log('No RDF data found in the JSON payload.');
-            }
-        } else {
-            console.log('No JSON block found in the HTML.');
-        }
-    } catch (error) {
-        console.error('Error fetching RDF data:', error);
-    }
-    return {
-        xsdValues: Array.from(xsdValues),
-        fnoTypes: Array.from(fnoTypes),
-        subjectTypes: Array.from(subjectTypes),
-        objectTypes: Array.from(objectTypes),
-        listElementInfo
-    };
-}
-
 async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: string[], fnoTypes: string[], subjectTypes: string[], objectTypes: string[], listElementInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] }[] }> {
     const xsdValues: Set<string> = new Set();
     const fnoTypes: Set<string> = new Set();
@@ -499,7 +305,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                 rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
 
                 const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
-                //const simpleTypeRegex =  /fno:predicate\s+"\$(s|o)"\s*;\s*fno:type\s+(xsd:\w+|rdf:\w+)/g;  // New regex for simple types
                 let parameterMatch;
                 let simpleTypeMatch;
 
@@ -535,7 +340,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                         // Handle subject types explicitly
                         if (isSubject) {
                             subjectTypes.add(typeContent);  // Add any type (log:Uri, rdf:List, etc.) for the subject
-                            //console.log(`Extracted typeContent for subject: ${typeContent}`);
 
                             // Check for XSD-specific types within the subject type
                             const typeXsdRegex = /xsd:[\w-]+/g;
@@ -549,7 +353,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                         // Handle object types explicitly
                         if (isObject) {
                             objectTypes.add(typeContent);  // Add any type (xsd:string, rdf:List, etc.) for the object
-                            //console.log(`Extracted typeContent for object: ${typeContent}`);
 
                             // Check for XSD-specific types within the object type
                             const typeXsdRegex = /xsd:[\w-]+/g;
@@ -560,14 +363,11 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                             }
                         }
                     }
-
                     const simpleTypeRegex = /fnon:position\s+fnon:(subject|object)\s*;\s*fno:type\s+(xsd:\w+|rdf:\w+)/g;
 					// Check if `listElements` or `listElementType` exist for subject or object
                     const hasListElementsOrType = /fnon:listElements|fnon:listElementType/.test(parameterBlock);
-					// **Debugging Output**
-                    //console.log(`hasListElementsOrType: ${hasListElementsOrType}`);
 
-                    // **New Condition**: Apply simpleTypeRegex only if neither `listElements` nor `listElementType` exists
+                    // Apply simpleTypeRegex only if neither `listElements` nor `listElementType` exists
                     if (!hasListElementsOrType) {
                         // Apply simple type regex to capture subject and object types separately
                         while ((simpleTypeMatch = simpleTypeRegex.exec(parameterBlock)) !== null) {
@@ -626,32 +426,23 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
 					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
 						const listBlock = match[2]; // the full content of `fnon:listElements`
-						//console.log("Entering multitype list element block with listBlock:", listBlock);
 					
 						let typeMatch: RegExpExecArray | null;
 						let elementIndex = 1;
 					
 						// Handle owl:unionOf types if present
 						if (listBlock.includes('owl:unionOf')) {
-							//console.log("owl:unionOf detected in listBlock.");
 							while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
 								const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
-								//console.log("Extracted union types:", unionTypes);
 								subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
 								elementIndex++;
 							}
-						} else {
-							// When there's no owl:unionOf, capture list element types using fnon:position
-							//console.log("owl:unionOf not detected, handling regular list elements by position.");
-							
+						} else {							
 							const typeCaptureRegex = /fno:type\s+(xsd:\w+|rdf:\w+)/g;
 							let typeMatch: RegExpExecArray | null;
 					
 							while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
 								const listElementType = typeMatch[1]; // Capture the type (xsd:string, xsd:float, etc.)
-								//console.log(`Extracted list element type: ${listElementType}`);
-								//subjectListElementTypes.push(listElementType); // Add the extracted type to the array
-								//elementIndex++; // Move to next element
 
 								// Assign type to the matched list element ($s.1, $s.2, etc.)
 								subjectListElementTypes[elementIndex - 1] = listElementType;
@@ -659,11 +450,8 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 								
 							}
 						}
-						//console.log("Final subjectListElementTypes:", subjectListElementTypes);
 					}					
-					
-
-                    // Handle multitype object lists (e.g., o.1, o.2)
+				    // Handle multitype object lists (e.g., o.1, o.2)
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
                         const listBlock = match[2];
                         
@@ -674,19 +462,17 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                             objectListElementTypes[elementIndex - 1] = typeMatch[1];
                             elementIndex++;
                         }
-						//console.log("Final objectListElementTypes:", objectListElementTypes);
                     }
 
                     // Store list element types for subject
                     if (subjectListElementTypes.length > 0) {
                         listInfo.subjectListElementTypes = subjectListElementTypes;
-						//connection.console.log(` subject expected types: ${subjectListElementTypes}`);
+
                     }
                     // Store list element types for object
                     if (objectListElementTypes.length > 0) {
                         listInfo.objectListElementTypes = objectListElementTypes;
                     }
-					// Capture owl:unionOf content for both subject and object types
 
 					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
 					const unionOfMatch = unionOfRegex.exec(parameterBlock);
@@ -718,12 +504,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
-
-	// After fnoTypes have been processed, add a log statement like this
-	//console.log("Captured fno:types:", Array.from(fnoTypes));
-	//console.log("Captured subject types:", Array.from(subjectTypes));
-	//console.log("Captured object types", Array.from(objectTypes));
-	//console.log("listElementInfo: "listElementInfo) 
 
     return {
         xsdValues: Array.from(xsdValues),
