@@ -217,45 +217,44 @@ function getDocumentSettings(resource: string): Thenable<any> {
 	return result;
 }
 
+// URL to fetch EYE built-ins from
 const BUILTINS_URL = 'https://eulersharp.sourceforge.net/2003/03swap/eye-builtins.html';
 
 async function fetchBuiltIns(): Promise<Map<string, Set<string>>> {
     try {
+		// Perform a GET request to fetch the raw HTML content from the built-ins URL
         const response = await axios.get(BUILTINS_URL);
         const data = response.data as string;
 
-        //console.log("Data fetched successfully");
-        //console.log("Raw Data Response:", data); // To see the raw HTML
+        // Map to store built-ins: key is the prefix (e.g., math), value is a Set of function names
+		const builtIns = new Map<string, Set<string>>();
 
-        const builtIns = new Map<string, Set<string>>();
-
-        const functionRegex = /<a class="qname" href="[^"]+">(\w+):(\w+)<\/a> <span class="keyword">a<\/span> <a class="qname" href="[^"]+">e:Builtin<\/a>\./g;
+        // Regex to match built-in functions in the HTML
+		const functionRegex = /<a class="qname" href="[^"]+">(\w+):(\w+)<\/a> <span class="keyword">a<\/span> <a class="qname" href="[^"]+">e:Builtin<\/a>\./g;
 
         let match;
         let matchCount = 0;
+
+		// Loop through all matches found using the regex
         while ((match = functionRegex.exec(data)) !== null) {
             const prefix = match[1];
             const func = match[2];
-            //console.log(`Match ${++matchCount} - Prefix: ${prefix}, Function: ${func}`);
 
             if (!builtIns.has(prefix)) {
                 builtIns.set(prefix, new Set());
             }
+			// Add the function name to the corresponding prefix's Set
             builtIns.get(prefix)!.add(func);
         }
 
-        // After processing all matches
-        //console.log(`Total matches found: ${matchCount}`);
-        //logBuiltIns(builtIns);
-
-        return builtIns;
+        return builtIns; // Return the map of built-ins
     } catch (error) {
         if (error instanceof Error) {
             console.error(`Error fetching built-ins: ${error.message}`);
         } else {
             console.error('Unknown error fetching built-ins');
         }
-        return new Map();
+        return new Map(); 
     }
 }
 
