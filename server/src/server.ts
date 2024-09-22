@@ -506,6 +506,12 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     } catch (error) {
         console.error('Error fetching RDF data:', error);
     }
+    //console.log("Final Data Output:");
+    //console.log("xsdValues:", Array.from(xsdValues));
+    //console.log("fnoTypes:", Array.from(fnoTypes));
+    //console.log("subjectTypes:", Array.from(subjectTypes));
+    //console.log("objectTypes:", Array.from(objectTypes));
+    //console.log("listElementInfo:", listElementInfo);
 
     return {
         xsdValues: Array.from(xsdValues),
@@ -515,7 +521,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
         listElementInfo
     };
 }
-
 
 // Function to determine if the error is an Axios error
 function isAxiosError(error: unknown): error is AxiosError {
@@ -888,6 +893,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								const typeMapping: Record<string, string> = {
 									"rdf:List": "list",  // Treat rdf:List as a list
 									"xsd:float": "float",
+									"[   rdf:type rdfs:Datatype": "datatype",
 									"xsd:decimal": "decimal",
 									"xsd:string": "string",
 									"rdf:Function": "function",
@@ -927,22 +933,51 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 								// Subject type matching test
 								let subjectTypeMatched = false;
-								for (const fnoType of subjectTypes) {
-									if (subjectType === "variable" || 
-										typeMapping[fnoType] === subjectType || 
-										(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
-										(fnoType === "log:Formula" && subjectType === "list")) {
-										connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
-										subjectTypeMatched = true;
-										break;
+
+								// Check if the subject is a variable
+								if (subjectType === "variable") {
+									// Since the variable is always valid, just log that it matches with the fno:type
+									for (const fnoType of subjectTypes) {
+										connection.console.log(`The subject type "variable" matches with fno:type "${fnoType}".`);
+									}
+									subjectTypeMatched = true;  // Variable is always considered valid
+								} else {
+									// Prioritize matching rdf:List or datatype first
+									for (const fnoType of subjectTypes) {
+										if (fnoType === "rdf:List" || fnoType.startsWith("[ rdf:type rdfs:Datatype")) {
+											if (subjectType === "list") {
+												connection.console.log(`The subject type "list" matches with fno:type "${fnoType}".`);
+												subjectTypeMatched = true;
+												break;
+											} else {
+												connection.console.warn(`The subject type is "${subjectType}", but expected "list".`);
+												subjectTypeMatched = true;  // Mark it as matched so we don't proceed further
+												break;  // Stop further checks as we've already issued a warning
+											}
+										}
+									}
+								
+									// Continue only if no warning has been issued in the previous step
+									if (!subjectTypeMatched) {
+										for (const fnoType of subjectTypes) {
+											// Check if subjectType matches against typeMapping
+											if (typeMapping[fnoType] === subjectType || 
+												(fnoType === "log:Formula" && subjectType === "list")) {
+												connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
+												subjectTypeMatched = true;
+												break;
+											}
+										}
 									}
 								}
 								
+								// If no match found after all checks
 								if (!subjectTypeMatched) {
 									for (const fnoType of subjectTypes) {
 										connection.console.warn(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
 									}
-								}
+								}								
+								
 
 								// Track variables already logged to avoid duplicates
 								const loggedVariables: Set<string> = new Set();
@@ -967,6 +1002,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 									// Dynamically extract expected types from listElementInfo for subject
 									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
+										//connection.console.log(`Extracting expected type for subject at index ${index}: ${expectedType}`);
 										expectedType = expectedType.trim()|| "undefined";;
 									
 										if (expectedType.includes('owl:unionOf')) {
@@ -985,6 +1021,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										} else {
 											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
 										}
+										//console.log('Final subject expected types:', subjectExpectedTypes);
 
 										//connection.console.log(`Extracted expected type for index ${index}: ${subjectExpectedTypes[index]}`);
 									});
@@ -1132,8 +1169,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								// Object type matching test
 								let objectTypeMatched = false;
 								
+								const mismatchedTypes: string[] = []; // Array to store all mismatched fno:types
 								// Iterate over the extracted object types and try to match them with the actual object type
-								for (const fnoType of objectTypes) {
+								/*for (const fnoType of objectTypes) {
 									if (objectType === "variable" || 
 										typeMapping[fnoType] === objectType || 
 										(fnoType === "xsd:string" && objectType === "string") ||  // Ensure xsd:string matches string
@@ -1150,7 +1188,35 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									for (const fnoType of objectTypes) {
 										connection.console.warn(`The object type "${objectType}" and fno:type "${fnoType}" do not match.`);
 									}
+								}*/ 
+								
+								// Iterate over the extracted object types and try to match them with the actual object type
+								for (const fnoType of objectTypes) {
+									// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
+									if (
+										objectType === "variable" || 
+										typeMapping[fnoType] === objectType || 
+										(fnoType === "xsd:string" && objectType === "string") ||  // Ensure xsd:string matches string
+										(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
+										(fnoType === "log:Formula" && objectType === "list")
+									) {
+										connection.console.log(`The object data type ${objectType} and fno:type "${fnoType}" match.`);
+										objectTypeMatched = true;
+										break;
+									} else if (fnoType.startsWith('xsd:')) {
+										// Only add XSD types to mismatchedTypes for logging
+										mismatchedTypes.push(fnoType);
+									}
 								}
+								
+								// Log a single message if no match is found for the object type
+								if (!objectTypeMatched) {
+									if (mismatchedTypes.length > 0) {
+										const mismatchedTypeList = mismatchedTypes.join('", "');
+										connection.console.warn(`The object type "${objectType}" and fno:type ("${mismatchedTypeList}") do not match.`);
+									}
+								}
+								
 								
 																							
 								// Check if the object is a list, then validate each item type
