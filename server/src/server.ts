@@ -268,16 +268,19 @@ function logBuiltIns(builtIns: Map<string, Set<string>>) {
     });
 }
 
-async function checkFunctionInPrefix(prefix: string, func: string): Promise<boolean> {
-    const builtIns = await fetchBuiltIns();
-    //console.log(`Checking function "${func}" in prefix "${prefix}": `, builtIns.get(prefix));  // Debug message
+async function checkFunctionInPrefix(prefix: string, func: string): Promise<boolean> { 
+	// Fetch the list of built-in functions and prefixes and collect them as a map
+	const builtIns = await fetchBuiltIns();
+
+	// Check whether the given prefix exists in the fetched built-in map
     if (builtIns.has(prefix)) {
+		// If the prefix exists, check if the given function exists under that prefix
         const exists = builtIns.get(prefix)!.has(func);
         if (exists) {
             return true;
         }
     } else if (prefix !== "") {
-        console.log(`No functions found for prefix "${prefix}".`);
+        connection.console.log(`No functions found for prefix "${prefix}".`);
     }
     return false;
 }
@@ -373,7 +376,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                         while ((simpleTypeMatch = simpleTypeRegex.exec(parameterBlock)) !== null) {
                             const position = simpleTypeMatch[1]; // 's' for subject, 'o' for object
                             const type = simpleTypeMatch[2]; // xsd:string, xsd:float, etc.
-                            //console.log(`Captured type: ${type} for position: ${position}`);
 
                             if (position === 'subject') {
                                 subjectTypes.add(type);
@@ -423,7 +425,6 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                     }
 
                     // Handle multitype subject lists (e.g., s.1, s.2)
-
 					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
 						const listBlock = match[2]; // the full content of `fnon:listElements`
 					
@@ -450,7 +451,8 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 								
 							}
 						}
-					}					
+					}
+
 				    // Handle multitype object lists (e.g., o.1, o.2)
                     while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
                         const listBlock = match[2];
@@ -761,46 +763,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				
 				return [items, listItemTypes];
 			}
-		
-			function validate_variable_types(types: string[], expectedTypes: Set<string>, variableTypes: Record<string, string>): boolean {
-				let allTypesValid = true;
-			
-				for (const type of types) {
-					if (type === "variable") {
-						// Extract variable name from the types list
-						const variableName = types.find(item => item.startsWith("?"));
-			
-						if (variableName) {
-							// Get the expected type for the variable
-							const expectedTypeForVariable = variableTypes[variableName];
-			
-							if (expectedTypeForVariable) {
-								// Check if the expected type for the variable matches any of the expected types
-								if (expectedTypes.has(expectedTypeForVariable)) {
-									connection.console.log(`Variable ${variableName} (expected type: ${expectedTypeForVariable}) matches the expected xsd types.`);
-								} else {
-									connection.console.log(`Variable ${variableName} (expected type: ${expectedTypeForVariable}) does not match the expected xsd types: ${Array.from(expectedTypes).join(", ")}.`);
-									allTypesValid = false;
-								}
-							} else {
-								// Variable type is still unknown, defer the validation
-								connection.console.log(`Variable ${variableName} is still unresolved (unknown type).`);
-								allTypesValid = false; // Variable is not valid if its type is unknown
-							}
-						} else {
-							// No variable name was found in the types array
-							connection.console.log("No variable name found in types.");
-							allTypesValid = false;
-						}
-					} else if (!expectedTypes.has(type)) {
-						// Literal type does not match any of the expected types
-						connection.console.warn(`Literal type ${type} does not match expected xsd types: ${Array.from(expectedTypes).join(", ")}.`);
-						allTypesValid = false;
-					}
-				}
-			
-				return allTypesValid;
-			} 
 
 			/**
 			 * Extracts the potential variable types for each variable.
