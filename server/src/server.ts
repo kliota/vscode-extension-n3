@@ -307,196 +307,235 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
                 // Replace shortcut `=>` with `log:implies` and `<=` with `log:impliedBy`
                 rdfData = rdfData.replace(/=>/g, 'log:implies').replace(/<=/g, 'log:impliedBy');
 
-                const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
-                let parameterMatch;
+				const parameterRegex = /\[\s*a\s*fno:Parameter\s*;([\s\S]*)\s*\]/g;
+				let parameterMatch;
+
                 let simpleTypeMatch;
 
-                // Step through each parameter block
-                while ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
-                    const parameterBlock = parameterMatch[0];
-
-                    // Create an entry to store separate subject and object counts and types
+				if ((parameterMatch = parameterRegex.exec(rdfData)) !== null) {
+					const parameterBlock = parameterMatch[0];
+					
+					// Create an entry to store separate subject and object counts and types
                     const listInfo: { subjectElementCount?: number, objectElementCount?: number, subjectListElementTypes?: string[], objectListElementTypes?: string[] } = {};
 
-                    // Check if the parameter is subject or object
-                    const positionRegex = /fnon:position\s+fnon:(\w+)/;
-					//const positionRegex = /fnon:position\s+fnon:(subject|object)/;
-                    const positionMatch = positionRegex.exec(parameterBlock);
-                    const isSubject = positionMatch && positionMatch[1] === 'subject';
-                    const isObject = positionMatch && positionMatch[1] === 'object';
-
-                    // Capture fno:type for either subject or object
+					// Capture fno:type for either subject or object
                     const typeRegex = /fno:type\s+([\s\S]*?)(?:;|\])/g;
                     let typeMatch: RegExpExecArray | null;
 
-                    // Arrays to store list element types for subject and object
-                    const subjectListElementTypes: string[] = [];
-                    const objectListElementTypes: string[] = [];
+					const typeXsdRegex = /xsd:[\w-]+/g;
+                    let typeXsdMatch: RegExpExecArray | null;
 
-                    // Handle subject and object elements based on the regex matches
-                    while ((typeMatch = typeRegex.exec(parameterBlock)) !== null) {
-                        const typeContent = typeMatch[1].trim();
+					const simpleTypeRegex = /fnon:position\s+fnon:(subject|object)\s*;\s*fno:type\s+(xsd:\w+|rdf:\w+)/g;
 
-                        // Add fno:type globally
-                        fnoTypes.add(typeContent);
+					let isSubject = false;
+					let isObject = false;
 
-                        // Handle subject types explicitly
-                        if (isSubject) {
-                            subjectTypes.add(typeContent);  // Add any type (log:Uri, rdf:List, etc.) for the subject
-
-                            // Check for XSD-specific types within the subject type
-                            const typeXsdRegex = /xsd:[\w-]+/g;
-                            let typeXsdMatch: RegExpExecArray | null;
-                            while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
-                                xsdValues.add(typeXsdMatch[0]);
-                                subjectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the subject
-                            }
-                        }
-
-                        // Handle object types explicitly
-                        if (isObject) {
-                            objectTypes.add(typeContent);  // Add any type (xsd:string, rdf:List, etc.) for the object
-
-                            // Check for XSD-specific types within the object type
-                            const typeXsdRegex = /xsd:[\w-]+/g;
-                            let typeXsdMatch: RegExpExecArray | null;
-                            while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
-                                xsdValues.add(typeXsdMatch[0]);
-                                objectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the object
-                            }
-                        }
-                    }
-                    const simpleTypeRegex = /fnon:position\s+fnon:(subject|object)\s*;\s*fno:type\s+(xsd:\w+|rdf:\w+)/g;
-					// Check if `listElements` or `listElementType` exist for subject or object
-                    const hasListElementsOrType = /fnon:listElements|fnon:listElementType/.test(parameterBlock);
-
-                    // Apply simpleTypeRegex only if neither `listElements` nor `listElementType` exists
-                    if (!hasListElementsOrType) {
-                        // Apply simple type regex to capture subject and object types separately
-                        while ((simpleTypeMatch = simpleTypeRegex.exec(parameterBlock)) !== null) {
-                            const position = simpleTypeMatch[1]; // 's' for subject, 'o' for object
-                            const type = simpleTypeMatch[2]; // xsd:string, xsd:float, etc.
-
-                            if (position === 'subject') {
-                                subjectTypes.add(type);
-								//console.log(`Added subject type: ${type}`);						
-                            } else if (position === 'object') {
-                                objectTypes.add(type);
-								//console.log(`Added object type: ${type}`);
-                            }
-                        }
-                    }
-
-                    // Count the number of subject list elements
-                    const subjectElementCountRegex = /fno:predicate\s+"\$s\.(\d+)"/g;
-                    let match: RegExpExecArray | null;
-                    let subjectElementCount = 0;
-                    while ((match = subjectElementCountRegex.exec(parameterBlock)) !== null) {
-                        subjectElementCount = Math.max(subjectElementCount, parseInt(match[1]));
-                    }
-                    if (subjectElementCount > 0) {
-                        listInfo.subjectElementCount = subjectElementCount;
-                    }
-
-                    // Count the number of object list elements
-                    const objectElementCountRegex = /fno:predicate\s+"\$o\.(\d+)"/g;
-                    let objectElementCount = 0;
-                    while ((match = objectElementCountRegex.exec(parameterBlock)) !== null) {
-                        objectElementCount = Math.max(objectElementCount, parseInt(match[1]));
-                    }
-                    if (objectElementCount > 0) {
-                        listInfo.objectElementCount = objectElementCount;
-                    }
-
-                    // Collect types of list elements for both Subject and Object
+					// Regex for collecting types of list elements for both Subject and Object
                     const monotypeListElementTypeRegex = /fnon:listElementType\s*\[\s*([\s\S]*?)fno:type\s*([\s\S]*)\s*\]\s*\]/g;
                     const subjectMultitypeListElementTypeRegex = /\$s([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)([\s\S]*?)\$o/g;
                     const objectMultitypeListElementTypeRegex = /\$o([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
                     const typeCaptureRegex = /fno:type\s*([\w:]+)/g;
                     const typeCaptureRegexSubject = /fno:type\s*\[\s*rdf:type\s*rdfs:Datatype\s*;\s*owl:unionOf\s*\((.*?)\)\s*\]/g;
 
-                    // Handle monotype subject lists
-                    while ((match = monotypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        if (isSubject) {
-                            subjectListElementTypes.push(match[2]);
-                        } else if (isObject) {
-                            objectListElementTypes.push(match[2]);
-                        }
-                    }
+					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
 
-                    // Handle multitype subject lists (e.g., s.1, s.2)
-					while ((match = subjectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-						const listBlock = match[2]; // the full content of `fnon:listElements`
-					
-						let typeMatch: RegExpExecArray | null;
-						let elementIndex = 1;
-					
-						// Handle owl:unionOf types if present
-						if (listBlock.includes('owl:unionOf')) {
-							while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
-								const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
-								subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
-								elementIndex++;
+					// Start for subject
+					const subjectRegex = /\[\s*a\s*fno:Parameter\s*;[\s\S]*?fnon:position\s+fnon:subject[\s\S]*?\]\s*\[\s*a\s*fno:Parameter/;
+					let subjectMatch;
+					// Array for storing subject list element types if the subject is a list
+					const subjectListElementTypes: string[] = [];
+					// Populate the subject block
+					if ((subjectMatch = subjectRegex.exec(parameterBlock)) !== null) {
+						isSubject = true;
+						const subjectBlock = subjectMatch[0];
+						// Handle the subject elements based on the regex matches
+						while ((typeMatch = typeRegex.exec(subjectBlock)) !== null) {
+							const typeContent = typeMatch[1].trim();
+							// Add fno:type globally
+							fnoTypes.add(typeContent);
+							subjectTypes.add(typeContent);  // Add any type (log:Uri, rdf:List, etc.) for the subject
+							while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
+                                xsdValues.add(typeXsdMatch[0]);
+                                subjectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the subject
+                            }
+						}
+
+						// Check if `listElements` or `listElementType` exist for subject
+						const hasListElementsOrType = /fnon:listElements|fnon:listElementType/.test(subjectBlock);
+						// Apply simpleTypeRegex only if neither `listElements` nor `listElementType` exists
+						if (!hasListElementsOrType) {
+							// Apply simple type regex to capture subject and object types separately
+							while ((simpleTypeMatch = simpleTypeRegex.exec(subjectBlock)) !== null) {
+								const type = simpleTypeMatch[2]; // xsd:string, xsd:float, etc.
+								subjectTypes.add(type);
 							}
-						} else {							
-							const typeCaptureRegex = /fno:type\s+(xsd:\w+|rdf:\w+)/g;
-							let typeMatch: RegExpExecArray | null;
-					
-							while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
-								const listElementType = typeMatch[1]; // Capture the type (xsd:string, xsd:float, etc.)
+						}
 
-								// Assign type to the matched list element ($s.1, $s.2, etc.)
-								subjectListElementTypes[elementIndex - 1] = listElementType;
-								elementIndex++; // Move to next element
-								
+						// Count the number of subject list elements
+						const subjectElementCountRegex = /fno:predicate\s+"\$s\.(\d+)"/g;
+						let match: RegExpExecArray | null;
+						let subjectElementCount = 0;
+						while ((match = subjectElementCountRegex.exec(subjectBlock)) !== null) {
+							subjectElementCount = Math.max(subjectElementCount, parseInt(match[1]));
+						}
+						if (subjectElementCount > 0) {
+							listInfo.subjectElementCount = subjectElementCount;
+						}
+                    	
+						// Handle monotype subject lists
+						while ((match = monotypeListElementTypeRegex.exec(subjectBlock)) !== null) {
+							subjectListElementTypes.push(match[2]);
+						}
+
+						// Handle multitype subject lists (e.g., s.1, s.2)
+						while ((match = subjectMultitypeListElementTypeRegex.exec(subjectBlock)) !== null) {
+							const listBlock = match[2]; // the full content of `fnon:listElements`
+						
+							let typeMatch: RegExpExecArray | null;
+							let elementIndex = 1;
+						
+							// Handle owl:unionOf types if present
+							if (listBlock.includes('owl:unionOf')) {
+								while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
+									const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
+									subjectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
+									elementIndex++;
+								}
+							} else {							
+								const typeCaptureRegex = /fno:type\s+(xsd:\w+|rdf:\w+)/g;
+								let typeMatch: RegExpExecArray | null;
+						
+								while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
+									const listElementType = typeMatch[1]; // Capture the type (xsd:string, xsd:float, etc.)
+
+									// Assign type to the matched list element ($s.1, $s.2, etc.)
+									subjectListElementTypes[elementIndex - 1] = listElementType;
+									elementIndex++; // Move to next element
+									
+								}
+							}
+						}
+
+						// Store list element types for subject
+						if (subjectListElementTypes.length > 0) {
+							listInfo.subjectListElementTypes = subjectListElementTypes;
+	
+						}
+
+						const unionOfMatch = unionOfRegex.exec(subjectBlock);
+						if (unionOfMatch) {
+							const unionOfContent = unionOfMatch[1];
+							// Extract XSD types from unionOf for subject
+							const unionOfXsdRegex = /xsd:[\w-]+/g;
+							let unionOfXsdMatch;
+							while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
+								xsdValues.add(unionOfXsdMatch[0]);
+								subjectTypes.add(unionOfXsdMatch[0]);
 							}
 						}
 					}
 
-				    // Handle multitype object lists (e.g., o.1, o.2)
-                    while ((match = objectMultitypeListElementTypeRegex.exec(parameterBlock)) !== null) {
-                        const listBlock = match[2];
-                        
-                        let typeMatch: RegExpExecArray | null;
-                        let elementIndex = 1;
+					// Start for object
+					const objectRegex = /\]\s*\[\s*a\s*fno:Parameter\s*;[\s\S]*?fnon:position\s+fnon:object[\s\S]*\]/;	
+					let objectMatch;
+					// Array for storing object list element types if the object is a list
+					const objectListElementTypes: string[] = [];
+					// Populate the object block
+					if ((objectMatch = objectRegex.exec(parameterBlock)) !== null) {
+						isSubject = false;
+						isObject = true;
+						const objectBlock = objectMatch[0];
+						//console.log(`----------- object block is: ${objectBlock}`);
+						// Handle the object elements based on the regex matches
+						while ((typeMatch = typeRegex.exec(objectBlock)) !== null) {
+							const typeContent = typeMatch[1].trim();
+							// Add fno:type globally
+							fnoTypes.add(typeContent);
+							objectTypes.add(typeContent);  // Add any type (xsd:string, rdf:List, etc.) for the object
+							while ((typeXsdMatch = typeXsdRegex.exec(typeContent)) !== null) {
+                                xsdValues.add(typeXsdMatch[0]);
+                                objectTypes.add(typeXsdMatch[0]);  // Add any XSD types to the object
+                            }
+						}
 
-                        while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
-                            objectListElementTypes[elementIndex - 1] = typeMatch[1];
-                            elementIndex++;
-                        }
-                    }
+						// Check if `listElements` or `listElementType` exist for object
+						const hasListElementsOrType = /fnon:listElements|fnon:listElementType/.test(objectBlock);
+						// Apply simpleTypeRegex only if neither `listElements` nor `listElementType` exists
+						if (!hasListElementsOrType) {
+							// Apply simple type regex to capture object types separately
+							while ((simpleTypeMatch = simpleTypeRegex.exec(objectBlock)) !== null) {
+								const type = simpleTypeMatch[2]; // xsd:string, xsd:float, etc.
+								objectTypes.add(type);
+							}
+						}
 
-                    // Store list element types for subject
-                    if (subjectListElementTypes.length > 0) {
-                        listInfo.subjectListElementTypes = subjectListElementTypes;
+						// Count the number of object list elements
+						const objectElementCountRegex = /fno:predicate\s+"\$o\.(\d+)"/g;
+						let match: RegExpExecArray | null;
+						let objectElementCount = 0;
+						while ((match = objectElementCountRegex.exec(objectBlock)) !== null) {
+							objectElementCount = Math.max(objectElementCount, parseInt(match[1]));
+						}
+						if (objectElementCount > 0) {
+							listInfo.objectElementCount = objectElementCount;
+						}
 
-                    }
-                    // Store list element types for object
-                    if (objectListElementTypes.length > 0) {
-                        listInfo.objectListElementTypes = objectListElementTypes;
-                    }
+						while ((match = monotypeListElementTypeRegex.exec(objectBlock)) !== null) {
+							objectListElementTypes.push(match[2]);
+						}
 
-					const unionOfRegex = /owl:unionOf\s*\(([\s\S]*?)\)/;
-					const unionOfMatch = unionOfRegex.exec(parameterBlock);
-					if (unionOfMatch) {
-						const unionOfContent = unionOfMatch[1];
-						// Extract XSD types from unionOf for subject or object
-						const unionOfXsdRegex = /xsd:[\w-]+/g;
-						let unionOfXsdMatch;
-						while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
-							xsdValues.add(unionOfXsdMatch[0]);
-							if (isSubject) {
-								subjectTypes.add(unionOfXsdMatch[0]);
-							} else if (isObject) {
+						// Handle multitype object lists (e.g., o.1, o.2)
+						while ((match = objectMultitypeListElementTypeRegex.exec(objectBlock)) !== null) {
+							const listBlock = match[2]; // the full content of `fnon:listElements`
+						
+							let typeMatch: RegExpExecArray | null;
+							let elementIndex = 1;
+						
+							// Handle owl:unionOf types if present
+							if (listBlock.includes('owl:unionOf')) {
+								while ((typeMatch = typeCaptureRegexSubject.exec(listBlock)) !== null) {
+									const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
+									objectListElementTypes[elementIndex - 1] = unionTypes.join(", ");
+									elementIndex++;
+								}
+							} else {							
+								const typeCaptureRegex = /fno:type\s+(xsd:\w+|rdf:\w+)/g;
+								let typeMatch: RegExpExecArray | null;
+						
+								while ((typeMatch = typeCaptureRegex.exec(listBlock)) !== null) {
+									const listElementType = typeMatch[1]; // Capture the type (xsd:string, xsd:float, etc.)
+
+									// Assign type to the matched list element ($o.1, $o.2, etc.)
+									objectListElementTypes[elementIndex - 1] = listElementType;
+									elementIndex++; // Move to next element
+									
+								}
+							}
+						}
+
+						// Store list element types for object
+						if (objectListElementTypes.length > 0) {
+							listInfo.objectListElementTypes = objectListElementTypes;
+						}
+
+						const unionOfMatch = unionOfRegex.exec(objectBlock);
+						if (unionOfMatch) {
+							const unionOfContent = unionOfMatch[1];
+							// Extract XSD types from unionOf for object
+							const unionOfXsdRegex = /xsd:[\w-]+/g;
+							let unionOfXsdMatch;
+							while ((unionOfXsdMatch = unionOfXsdRegex.exec(unionOfContent)) !== null) {
+								xsdValues.add(unionOfXsdMatch[0]);
 								objectTypes.add(unionOfXsdMatch[0]);
 							}
 						}
 					}
-                    // Only push if we have some information about subject or object
-                    if (listInfo.subjectElementCount || listInfo.objectElementCount || listInfo.subjectListElementTypes || listInfo.objectListElementTypes) {
-                        listElementInfo.push(listInfo);
-                    }
-                }
+
+					// Only push if we have some information about subject or object
+					if (listInfo.subjectElementCount || listInfo.objectElementCount || listInfo.subjectListElementTypes || listInfo.objectListElementTypes) {
+						listElementInfo.push(listInfo);
+					}
+				}
             } else {
                 console.log('No RDF data found in the JSON payload.');
             }
