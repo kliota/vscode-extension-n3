@@ -696,6 +696,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (value.startsWith(":")) return "function"; // Recognize functions
 				if (value.startsWith("?")) return "variable"; // Recognize variables
 				if (value.startsWith("<") && value.endsWith(">")) return "uri"; // Recognize URIs
+				if (value.match(/^"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z"\^\^xsd:dateTime$/)) return "xsd:dateTime";
 				return "unknown";
 			}
 		
@@ -899,7 +900,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									"rdf:Function": "function",
 									"log:Formula": "listOfFormulas",  // Maps log:Formula to listOfFormulas
 									"xsd:double": "double",
-									"log:Uri": "uri"  // URI mapping
+									"log:Uri": "uri",  // URI mapping
+									"xsd:dateTime": "dateTime"
 								};
 		
 								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, xsdValues)) {
