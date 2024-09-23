@@ -548,8 +548,8 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     //console.log("Final Data Output:");
     //console.log("xsdValues:", Array.from(xsdValues));
     //console.log("fnoTypes:", Array.from(fnoTypes));
-    //console.log("subjectTypes:", Array.from(subjectTypes));
-    //console.log("objectTypes:", Array.from(objectTypes));
+    console.log("subjectTypes:", Array.from(subjectTypes));
+    console.log("objectTypes:", Array.from(objectTypes));
     //console.log("listElementInfo:", listElementInfo);
 
     return {
@@ -940,7 +940,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									"log:Formula": "listOfFormulas",  // Maps log:Formula to listOfFormulas
 									"xsd:double": "double",
 									"log:Uri": "uri",  // URI mapping
-									"xsd:dateTime": "dateTime"
+									"xsd:dateTime": "xsd:dateTime"
 								};
 		
 								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, xsdValues)) {
@@ -975,7 +975,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 	
 								let subjectTypeMatched = false;		
 								const subjectMismatchedTypes: string[] = [];			
-
+ 
 								// Check if the subject is a variable
 								if (subjectType === "variable") {
 									subjectTypeMatched = true;  // Variable is always considered valid
@@ -1017,6 +1017,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 										if (subjectMismatchedTypes.length > 0) {
 											const subjectMismatchedTypesList = subjectMismatchedTypes.join('", "');
+											connection.console.log(`Mismatches types:${subjectMismatchedTypesList}`)
 											connection.console.warn(`The subject type "${subjectType}" and fno:type ("${subjectMismatchedTypesList}") do not match.`);
 											
 											// Skip further list item validation since the subject type doesn't match
@@ -1211,8 +1212,62 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 									}
 								}
-								
+
 								// Object type matching test
+	
+								let objectTypeMatched = false;		
+								const objectMismatchedTypes: string[] = [];			
+
+								// Check if the subject is a variable
+								if (objectType === "variable") {
+									objectTypeMatched = true;  // Variable is always considered valid
+								} else {
+									let objectNotAList = true;
+									// First, prioritize matching rdf:List or [rdf:type rdfs:Datatype]
+									for (const fnoType of objectTypes) {
+										
+										if (fnoType === "rdf:List" || fnoType.startsWith("[ rdf:type rdfs:Datatype")) {
+											objectNotAList = false;
+											// If the expected type and the existing type are both list
+											if (objectType === "list") {
+												connection.console.log(`The object type "list" matches with fno:type "${fnoType}".`);
+												objectTypeMatched = true;
+											} else { // If the expected type is list BUT the existing type is not a list
+												connection.console.warn(`The object type is "${objectType}", but expected "list".`);
+											}
+											break;
+										}
+									}
+									
+									// Log a single message if no match is found for the subject type
+									if (!objectTypeMatched && objectNotAList) {
+										for (const fnoType of objectTypes) {
+											// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
+											if (
+												typeMapping[fnoType] === objectType || 
+												(fnoType === "xsd:string" && objectType === "string") ||  // Ensure xsd:string matches string
+												(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
+												(fnoType === "log:Formula" && objectType === "list")
+											) {
+												connection.console.log(`The object data type "${objectType}" and fno:type "${fnoType}" match.`);
+												objectTypeMatched = true;
+												break;
+											} else if (fnoType.startsWith('xsd:')) {
+												// Only add XSD types to mismatchedTypes for logging
+												objectMismatchedTypes.push(fnoType);
+											}
+										}
+
+										if (objectMismatchedTypes.length > 0) {
+											const objectMismatchedTypesList = objectMismatchedTypes.join('", "');
+											connection.console.warn(`The object type "${objectType}" and fno:type ("${objectMismatchedTypesList}") do not match.`);
+											// Skip further list item validation since the subject type doesn't match
+											return;
+										}
+									}
+								}
+								
+								/*// Object type matching test
 								let objectTypeMatched = false;
 								const mismatchedTypes: string[] = []; // Array to store all mismatched fno:types
 								
@@ -1248,7 +1303,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											return;
 										}
 									}
-								}
+								}*/
 																							
 								// Check if the object is a list, then validate each item type
 								const variableTypeLogged: Record<string, boolean> = {};
