@@ -332,7 +332,7 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
 
 					// Regex for collecting types of list elements for both Subject and Object
                     const monotypeListElementTypeRegex = /fnon:listElementType\s*\[\s*([\s\S]*?)fno:type\s*([\s\S]*)\s*\]\s*\]/g;
-                    const subjectMultitypeListElementTypeRegex = /\$s([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)([\s\S]*?)\$o/g;
+                    const subjectMultitypeListElementTypeRegex = /\$s([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
                     const objectMultitypeListElementTypeRegex = /\$o([\s\S]*?)fnon:listElements\s*\(\s*((?:\[\s*[\s\S]*?\]\s*)+)\)/g;
                     const typeCaptureRegex = /fno:type\s*([\w:]+)/g;
                     const typeCaptureRegexSubject = /fno:type\s*\[\s*rdf:type\s*rdfs:Datatype\s*;\s*owl:unionOf\s*\((.*?)\)\s*\]/g;
@@ -977,40 +977,28 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 								// Check if the subject is a variable
 								if (subjectType === "variable") {
-									// Check if fno:types contains rdf:List first
-									const hasRdfList = subjectTypes.includes("rdf:List");
-								
-									if (hasRdfList) {
-										connection.console.log(`The subject type "variable" matches with fno:type "rdf:List".`);
-										subjectTypeMatched = true;
-									} else {
-										// Combine all the other fno:type matches into a single message for variables
-										const fnoTypeList = subjectTypes.join(', ');
-										connection.console.log(`The subject type "variable" matches with fno:types (${fnoTypeList}).`);
-										subjectTypeMatched = true;  // Variable is always considered valid
-									}
-								} else {
-									const mismatchedTypes: string[] = [];
-								
-									// Check for rdf:type rdfs:Datatype to compare xsd values like decimal, float, double
+									// Since the variable is always valid, just log that it matches with the fno:type
 									for (const fnoType of subjectTypes) {
-										if (fnoType.startsWith("[ rdf:type rdfs:Datatype")) {
-											// Only match against xsd values, ignore the rest
-											const validXsdTypes = xsdValues.filter(xsdType => !xsdType.startsWith("["));
-								
-											const xsdMatchFound = validXsdTypes.some(xsdType => xsdType === subjectType);
-								
-											if (xsdMatchFound) {
-												connection.console.log(`The subject type "${subjectType}" matches one of the xsd values in fno:type.`);
+										connection.console.log(`The subject type "variable" matches with fno:type "${fnoType}".`);
+									}
+									subjectTypeMatched = true;  // Variable is always considered valid
+								} else {
+									// Prioritize matching rdf:List or datatype first
+									for (const fnoType of subjectTypes) {
+										if (fnoType === "rdf:List" || fnoType.startsWith("[ rdf:type rdfs:Datatype")) {
+											if (subjectType === "list") {
+												connection.console.log(`The subject type "list" matches with fno:type "${fnoType}".`);
 												subjectTypeMatched = true;
 												break;
 											} else {
-												mismatchedTypes.push(...validXsdTypes);  // Only push xsd values to mismatchedTypes
+												connection.console.warn(`The subject type is "${subjectType}", but expected "list".`);
+												subjectTypeMatched = true;  // Mark it as matched so we don't proceed further
+												break;  // Stop further checks as we've already issued a warning
 											}
 										}
 									}
 								
-									// If no match is found in the previous step, continue checking against typeMapping or log mismatches
+									// Continue only if no warning has been issued in the previous step
 									if (!subjectTypeMatched) {
 										for (const fnoType of subjectTypes) {
 											// Check if subjectType matches against typeMapping
@@ -1019,20 +1007,15 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
 												subjectTypeMatched = true;
 												break;
-											} else if (!fnoType.startsWith("[ rdf:type rdfs:Datatype")) {
-												// Only push non-[ rdf:type rdfs:Datatype ] types to mismatchedTypes
-												mismatchedTypes.push(fnoType);
 											}
 										}
 									}
+								}
 								
-									// If no match is found after all checks, log mismatched types
-									if (!subjectTypeMatched && mismatchedTypes.length > 0) {
-										const mismatchedTypeList = mismatchedTypes.join('", "');
-										connection.console.warn(`The subject type "${subjectType}" and fno:type ("${mismatchedTypeList}") do not match.`);
-								
-										// Skip list validation if subject type is not valid
-										return;
+								// If no match found after all checks
+								if (!subjectTypeMatched) {
+									for (const fnoType of subjectTypes) {
+										connection.console.warn(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
 									}
 								}
 								
