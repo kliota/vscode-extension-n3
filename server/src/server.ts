@@ -973,52 +973,57 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 								// Subject type matching test
 	
-								let subjectTypeMatched = false;					
+								let subjectTypeMatched = false;		
+								const subjectMismatchedTypes: string[] = [];			
 
 								// Check if the subject is a variable
 								if (subjectType === "variable") {
-									// Since the variable is always valid, just log that it matches with the fno:type
-									for (const fnoType of subjectTypes) {
-										connection.console.log(`The subject type "variable" matches with fno:type "${fnoType}".`);
-									}
 									subjectTypeMatched = true;  // Variable is always considered valid
 								} else {
-									// Prioritize matching rdf:List or datatype first
+									let subjectNotAList = true;
+									// First, prioritize matching rdf:List or [rdf:type rdfs:Datatype]
 									for (const fnoType of subjectTypes) {
 										if (fnoType === "rdf:List" || fnoType.startsWith("[ rdf:type rdfs:Datatype")) {
+											subjectNotAList = false;
+											// If the expected type and the existing type are both list
 											if (subjectType === "list") {
 												connection.console.log(`The subject type "list" matches with fno:type "${fnoType}".`);
 												subjectTypeMatched = true;
-												break;
-											} else {
+											} else { // If the expected type is list BUT the existing type is not a list
 												connection.console.warn(`The subject type is "${subjectType}", but expected "list".`);
-												subjectTypeMatched = true;  // Mark it as matched so we don't proceed further
-												break;  // Stop further checks as we've already issued a warning
 											}
+											break;
 										}
 									}
-								
-									// Continue only if no warning has been issued in the previous step
-									if (!subjectTypeMatched) {
+									
+									// Log a single message if no match is found for the subject type
+									if (!subjectTypeMatched && subjectNotAList) {
 										for (const fnoType of subjectTypes) {
-											// Check if subjectType matches against typeMapping
-											if (typeMapping[fnoType] === subjectType || 
-												(fnoType === "log:Formula" && subjectType === "list")) {
-												connection.console.log(`The subject type ${subjectType} and fno:type "${fnoType}" match.`);
+											// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
+											if (
+												typeMapping[fnoType] === subjectType || 
+												(fnoType === "xsd:string" && subjectType === "string") ||  // Ensure xsd:string matches string
+												(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
+												(fnoType === "log:Formula" && subjectType === "list")
+											) {
+												connection.console.log(`The subject data type "${subjectType}" and fno:type "${fnoType}" match.`);
 												subjectTypeMatched = true;
 												break;
+											} else if (fnoType.startsWith('xsd:')) {
+												// Only add XSD types to mismatchedTypes for logging
+												subjectMismatchedTypes.push(fnoType);
 											}
+										}
+
+										if (subjectMismatchedTypes.length > 0) {
+											const subjectMismatchedTypesList = subjectMismatchedTypes.join('", "');
+											connection.console.warn(`The subject type "${subjectType}" and fno:type ("${subjectMismatchedTypesList}") do not match.`);
+											
+											// Skip further list item validation since the subject type doesn't match
+											return;
 										}
 									}
 								}
-								
-								// If no match found after all checks
-								if (!subjectTypeMatched) {
-									for (const fnoType of subjectTypes) {
-										connection.console.warn(`The subject type "${subjectType}" and fno:type "${fnoType}" do not match.`);
-									}
-								}
-								
 								
 								// Track variables already logged to avoid duplicates
 								const loggedVariables: Set<string> = new Set();
@@ -1213,9 +1218,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								
 								// Check if the object is a variable
 								if (objectType === "variable") {
-									// Combine all the fno:type matches into a single message
-									const fnoTypeList = objectTypes.join(', ');
-									connection.console.log(`The object type "variable" matches with fno:types (${fnoTypeList}).`);
 									objectTypeMatched = true;  // Variable is always considered valid
 								} else {
 									// Iterate over the extracted object types and try to match them with the actual object type
