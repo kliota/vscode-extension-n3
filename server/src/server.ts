@@ -1019,6 +1019,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									
 									// Log a single message if no match is found for the subject type
 									if (!subjectTypeMatched && subjectNotAList) {
+										let isnumeric = false;
 										for (const fnoType of subjectTypes) {
 											// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
 											if (
@@ -1029,6 +1030,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											) {
 												connection.console.log(`The subject data type "${subjectType}" and fno:type "${fnoType}" match.`);
 												subjectTypeMatched = true;
+												if(subjectType === "float" || subjectType === "decimal" || subjectType === "double"){
+													isnumeric = true;
+												}
 												break;
 											} else if (fnoType.startsWith('xsd:')) {
 												// Only add XSD types to mismatchedTypes for logging
@@ -1036,7 +1040,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											}
 										}
 
-										if (subjectMismatchedTypes.length > 0) {
+										if (subjectMismatchedTypes.length > 0 && !isnumeric) {
 											const subjectMismatchedTypesList = subjectMismatchedTypes.join('", "');
 											//connection.console.log(`Mismatches types:${subjectMismatchedTypesList}`)
 											connection.console.warn(`The subject type "${subjectType}" and fno:type ("${subjectMismatchedTypesList}") do not match.`);
@@ -1246,6 +1250,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									
 									// Log a single message if no match is found for the object type
 									if (!objectTypeMatched && objectNotAList) {
+
+										let isnumeric = false;
+										
 										for (const fnoType of objectTypes) {
 											// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
 											if (
@@ -1256,6 +1263,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											) {
 												connection.console.log(`The object data type "${objectType}" and fno:type "${fnoType}" match.`);
 												objectTypeMatched = true;
+												if(objectType === "float" || objectType === "decimal" || objectType === "double"){
+													isnumeric = true;
+												}
 												break;
 											} else if (fnoType.startsWith('xsd:')) {
 												// Only add XSD types to mismatchedTypes for logging
@@ -1263,7 +1273,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											}
 										}
 
-										if (objectMismatchedTypes.length > 0) {
+										if (objectMismatchedTypes.length > 0 && !isnumeric) {
 											const objectMismatchedTypesList = objectMismatchedTypes.join('", "');
 											connection.console.warn(`The object type "${objectType}" and fno:type ("${objectMismatchedTypesList}") do not match.`);
 										}
