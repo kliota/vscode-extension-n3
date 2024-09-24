@@ -1029,7 +1029,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												(fnoType === "xsd:string" && subjectType === "string") ||  // Ensure xsd:string matches string
 												(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
 												(fnoType === "log:Formula" && subjectType === "list") ||
-												(fnoType === "xsd:float" && subjectType === "integer")
+												(fnoType === "xsd:decimal" && subjectType === "integer")
 											) {
 												connection.console.log(`The subject data type "${subjectType}" and fno:type "${fnoType}" match.`);
 												subjectTypeMatched = true;
@@ -1174,7 +1174,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 																  (expectedTypes.includes("xsd:string") && item === "string") ||
 																  (expectedTypes.includes("xsd:float") && item === "float") ||
 																  (expectedTypes.includes("xsd:decimal") && item === "decimal") ||
-																  (expectedTypes.includes("xsd:float") && item === "integer") ||
+																  (expectedTypes.includes("xsd:decimal") && item === "integer") ||
 																  expectedTypes.includes("undefined");
 		
 										// Combine the XSD type check with single type validation logic
@@ -1210,7 +1210,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										  // Print a warning specifically for the invalid items
 										  connection.console.warn(`Invalid items detected: ${invalidItemMessages.join(", ")}.`);
 										
-
 									}									
 
 									// Additional checks for element counts (if needed)
@@ -1269,7 +1268,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												(fnoType === "xsd:string" && objectType === "string") ||
 												(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
 												(fnoType === "log:Formula" && objectType === "list") ||
-												(fnoType === "xsd:float" && objectType === "integer")
+												(fnoType === "xsd:decimal" && objectType === "integer")
 											) {
 												connection.console.log(`The object data type "${objectType}" and fno:type "${fnoType}" match.`);
 												objectTypeMatched = true;
