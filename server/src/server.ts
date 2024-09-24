@@ -834,6 +834,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				else if (LogFormulaType){
 					variableTypes[text] = "log:Formula";
 				}
+
 				else {
 					// If no 'rdf:List' is found, save only the values starting with 'xsd'
 					variableTypes[text] = typeValues
@@ -1029,7 +1030,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												(fnoType === "xsd:string" && subjectType === "string") ||  // Ensure xsd:string matches string
 												(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
 												(fnoType === "log:Formula" && subjectType === "list") ||
-												(fnoType === "xsd:decimal" && subjectType === "integer")
+												(fnoType === "xsd:decimal" && subjectType === "integer") ||
+												(fnoType === "xsd:integer" && subjectType === "integer")
 											) {
 												connection.console.log(`The subject data type "${subjectType}" and fno:type "${fnoType}" match.`);
 												subjectTypeMatched = true;
@@ -1117,7 +1119,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											variableMatch.forEach((variableName, i) => {
 												// Log only if this variable hasn't been logged yet
 												if (!loggedVariables.has(variableName)) {
-													get_variable_types(variableName, variableTypes, xsdValues);
+													get_variable_types(variableName, variableTypes, listElementInfo[0]?.subjectListElementTypes || []);
 													const varExpectedType = variableTypes[variableName] || "undefined";
 													let varCurrentType = variablesMap.get(variableName);
 													if (varCurrentType !== undefined && varCurrentType !== varExpectedType) {
@@ -1175,6 +1177,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 																  (expectedTypes.includes("xsd:float") && item === "float") ||
 																  (expectedTypes.includes("xsd:decimal") && item === "decimal") ||
 																  (expectedTypes.includes("xsd:decimal") && item === "integer") ||
+																  (expectedTypes.includes("xsd:integer") && item === "integer") ||
 																  expectedTypes.includes("undefined");
 		
 										// Combine the XSD type check with single type validation logic
@@ -1268,7 +1271,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												(fnoType === "xsd:string" && objectType === "string") ||
 												(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
 												(fnoType === "log:Formula" && objectType === "list") ||
-												(fnoType === "xsd:decimal" && objectType === "integer")
+												(fnoType === "xsd:decimal" && objectType === "integer") ||
+												(fnoType === "xsd:integer" && objectType === "integer")
 											) {
 												connection.console.log(`The object data type "${objectType}" and fno:type "${fnoType}" match.`);
 												objectTypeMatched = true;
@@ -1288,7 +1292,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 									}
 								}
-								
 																							
 								// Check if the object is a list, then validate each item type
 								const variableTypeLogged: Record<string, boolean> = {};
@@ -1338,7 +1341,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 								
 										// Validate the item
-										const isValid = item === "variable" || expectedType === "undefined" || expectedType === "any type" || expectedType === item ;
+										const isValid = item === "variable" || expectedType === "undefined" || expectedType === "any type" || expectedType === item || (expectedType === "xsd:integer" && item === "integer");
 								
 										return { type: item, expectedType, isValid };
 									});
