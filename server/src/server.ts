@@ -730,7 +730,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas"; // Recognize lists of formulas
 				if (value.match(/^\{.*\}$/s)) return "formula"; // Recognize individual formulas
 				if (value.match(/^\(.*\)$/s)) return "list"; // Recognize lists, including nested lists
-				if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; // Recognize floats
+				if (value.match(/^-?\d+(\.\d+)?$/) && parseFloat(value)%1 !== 0) return "float"; // Recognize floats
+				if (value.match(/^-?\d+(\.\d+)?$/) && parseFloat(value)%1 === 0) return "integer"; // Recognize integers
 				if (value.match(/^".*"$/)) return "string"; // Recognize strings
 				if (value.startsWith(":")) return "function"; // Recognize functions
 				if (value.startsWith("?")) return "variable"; // Recognize variables
@@ -922,7 +923,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				[prefix, func] = correspondingFunction.split(':');
 				// Handle the logic as needed for these cases, no need for prefix validation
 			} else {
-				connection.console.warn("Invalid verb format; missing prefix and function.");
+				connection.console.warn("Verb format is not recognized, consistency checks won't be conducted for the triple.");
 				return;
 			}
 		
@@ -1172,9 +1173,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 																  (expectedTypes.includes("xsd:float") && item === "float") ||
 																  (expectedTypes.includes("xsd:decimal") && item === "decimal") ||
 																  expectedTypes.includes("undefined");
-									
+		
 										// Combine the XSD type check with single type validation logic
 										const isValid = isValidXsdType || isValidSingleType;
+										// Validate the item
 									
 										return {
 											type: item,
@@ -1329,8 +1331,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 								
 										// Validate the item
-										const isValid = item === "variable" || expectedType === "undefined" || expectedType === "any type" || expectedType === item ||
-											(item === "float" && expectedType === "xsd:integer"); // Allow float -> integer coercion
+										const isValid = item === "variable" || expectedType === "undefined" || expectedType === "any type" || expectedType === item ;
 								
 										return { type: item, expectedType, isValid };
 									});
