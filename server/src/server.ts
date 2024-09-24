@@ -1017,11 +1017,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 
 										if (subjectMismatchedTypes.length > 0) {
 											const subjectMismatchedTypesList = subjectMismatchedTypes.join('", "');
-											connection.console.log(`Mismatches types:${subjectMismatchedTypesList}`)
+											//connection.console.log(`Mismatches types:${subjectMismatchedTypesList}`)
 											connection.console.warn(`The subject type "${subjectType}" and fno:type ("${subjectMismatchedTypesList}") do not match.`);
-											
-											// Skip further list item validation since the subject type doesn't match
-											return;
 										}
 									}
 								}
@@ -1043,9 +1040,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									// Initialize expected types for the subject list items
 									//const subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
 									let subjectExpectedTypes: (string | string[])[] = listItems.map(() => "undefined");
-									
-									// Log the full listElementInfo to see if it's being populated
-									//connection.console.log(`listElementInfo: ${JSON.stringify(listElementInfo, null, 2)}`);
 
 									// Dynamically extract expected types from listElementInfo for subject
 									listElementInfo[0]?.subjectListElementTypes?.forEach((expectedType, index) => {
@@ -1068,19 +1062,14 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										} else {
 											subjectExpectedTypes[index] = "undefined";  // Default to undefined if no specific type is found
 										}
-										//console.log('Final subject expected types:', subjectExpectedTypes);
-
-										//connection.console.log(`Extracted expected type for index ${index}: ${subjectExpectedTypes[index]}`);
+										
 									});
-									
-									// Log the final `subjectExpectedTypes` array
-									//connection.console.log(`Final subject expected types: ${subjectExpectedTypes}`);
+
 																										
 									// Ensure all list elements get the same expected type if the function specifies a single type for the list
 									if (listElementInfo[0]?.subjectListElementTypes?.length === 1) {
 										for (let i = 0; i < listItems.length; i++) {
 											subjectExpectedTypes[i] = subjectExpectedTypes[0];  // Apply the same type to all list elements
-											//connection.console.log(`Extracted expected type for index ${i}: ${subjectExpectedTypes[i]}`);
 										}
 									}
 								
@@ -1149,8 +1138,6 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										// If the expected type is a union of types, check if the item matches any of the expected types
 										const isValidXsdType = itemXsdRdfLogTypes.some((itemXsdRdfLogType) => {
 											const isTypeValid = expectedTypes.includes(itemXsdRdfLogType);
-											//console.log(`    -> Comparing item XSD type "${itemXsdType}" with expected types "${expectedTypes.join(", ")}"`);
-											//console.log(`    -> Is this valid? ${isTypeValid ? "Yes" : "No"}`);
 											return isTypeValid;
 										});
 									
@@ -1174,31 +1161,23 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									
 
 									const validItems = itemValidationResults.filter(result => result.isValid);
-									const invalidItems = itemValidationResults.filter(result => !result.isValid );  // Exclude variables from invalid items
-								
-									let message = `The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) `;
+									const invalidItems = itemValidationResults.filter(result => !result.isValid );  // Exclude variables from invalid items							
 
-									// Check for valid items and append the message
-									if (validItems.length > 0) {
-										const validItemMessages = validItems.map(item => {
-											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
-										});
-										message += `match the expected xsd:type values. Valid items: ${validItemMessages.join(", ")}. `;
+									// Check for valid items 
+									if (validItems.length > 0 && subjectMismatchedTypes.length==0) {
+										connection.console.log(
+											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
+											`include valid types. Valid items: ${validItems.map(item => item.type).join(", ")}.`
+										);
 									}
 									
-									// Check for invalid items and print a warning instead of appending to the message
+									// Check for invalid items 
 									if (invalidItems.length > 0) {
-										const invalidItemMessages = invalidItems.map(item => {
-											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
-										});
-										
-										// Print a warning specifically for the invalid items
-										connection.console.warn(`Invalid items detected: ${invalidItemMessages.join(", ")}.`);
-									}
-									
-									// Log the final message only for valid items (if any)
-									connection.console.log(message);
-									
+										connection.console.warn(
+											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
+											`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${subjectText.split(/[()]/)[1].split(" ")[index]} (expected: ${item.expectedType})`).join(", ")}.`
+										);
+									}									
 
 									// Additional checks for element counts (if needed)
 									if (listElementInfo[0]?.subjectElementCount !== undefined) {
@@ -1216,9 +1195,9 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								// Object type matching test
 	
 								let objectTypeMatched = false;		
-								const objectMismatchedTypes: string[] = [];			
+								const objectMismatchedTypes: string[] = [];		
 
-								// Check if the subject is a variable
+								// Check if the object is a variable
 								if (objectType === "variable") {
 									objectTypeMatched = true;  // Variable is always considered valid
 								} else {
@@ -1239,13 +1218,13 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										}
 									}
 									
-									// Log a single message if no match is found for the subject type
+									// Log a single message if no match is found for the object type
 									if (!objectTypeMatched && objectNotAList) {
 										for (const fnoType of objectTypes) {
 											// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
 											if (
 												typeMapping[fnoType] === objectType || 
-												(fnoType === "xsd:string" && objectType === "string") ||  // Ensure xsd:string matches string
+												(fnoType === "xsd:string" && objectType === "string") ||
 												(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
 												(fnoType === "log:Formula" && objectType === "list")
 											) {
@@ -1261,49 +1240,10 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										if (objectMismatchedTypes.length > 0) {
 											const objectMismatchedTypesList = objectMismatchedTypes.join('", "');
 											connection.console.warn(`The object type "${objectType}" and fno:type ("${objectMismatchedTypesList}") do not match.`);
-											// Skip further list item validation since the subject type doesn't match
-											return;
 										}
 									}
 								}
 								
-								/*// Object type matching test
-								let objectTypeMatched = false;
-								const mismatchedTypes: string[] = []; // Array to store all mismatched fno:types
-								
-								// Check if the object is a variable
-								if (objectType === "variable") {
-									objectTypeMatched = true;  // Variable is always considered valid
-								} else {
-									// Iterate over the extracted object types and try to match them with the actual object type
-									for (const fnoType of objectTypes) {
-										// Filter only relevant types (xsd:* types and avoid logging rdf:List or intermediate steps like [rdf:type rdfs:Datatype])
-										if (
-											typeMapping[fnoType] === objectType || 
-											(fnoType === "xsd:string" && objectType === "string") ||  // Ensure xsd:string matches string
-											(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
-											(fnoType === "log:Formula" && objectType === "list")
-										) {
-											connection.console.log(`The object data type "${objectType}" and fno:type "${fnoType}" match.`);
-											objectTypeMatched = true;
-											break;
-										} else if (fnoType.startsWith('xsd:')) {
-											// Only add XSD types to mismatchedTypes for logging
-											mismatchedTypes.push(fnoType);
-										}
-									}
-									
-									// Log a single message if no match is found for the object type
-									if (!objectTypeMatched) {
-										if (mismatchedTypes.length > 0) {
-											const mismatchedTypeList = mismatchedTypes.join('", "');
-											connection.console.warn(`The object type "${objectType}" and fno:type ("${mismatchedTypeList}") do not match.`);
-								
-											// Skip further list item validation since the object type doesn't match
-											return;
-										}
-									}
-								}*/
 																							
 								// Check if the object is a list, then validate each item type
 								const variableTypeLogged: Record<string, boolean> = {};
@@ -1362,7 +1302,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									const validItems = itemValidationResults.filter(result => result.isValid);
 									const invalidItems = itemValidationResults.filter(result => !result.isValid);
 								
-									if (validItems.length > 0) {
+									if (validItems.length > 0 && objectMismatchedTypes.length==0) {
 										connection.console.log(
 											`The list item datatypes of object "${objectText}" (list item types: ${listItems.join(", ")}) ` +
 											`include valid types. Valid items: ${validItems.map(item => item.type).join(", ")}.`
