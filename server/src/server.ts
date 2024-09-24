@@ -295,6 +295,7 @@ type N3Type =
 	| {kind: 'float' | 'double' | 'decimal' | 'integer'; num: number | null}
 	| {kind: 'string' | 'uri' | 'function'; str: string | null}
 	| {kind: 'triple'; subject: N3Type | null; predicate: string | null; object: N3Type | null}
+	| {kind: 'boolean'; val: boolean|null}
 	| {kind: 'union'; types: N3Type[]}
 	| null
 
@@ -312,6 +313,7 @@ const xsd_integer_str = "http://www.w3.org/2001/XMLSchema#integer" as const;
 const xsd_decimal_str = "http://www.w3.org/2001/XMLSchema#decimal" as const;
 const xsd_double_str = "http://www.w3.org/2001/XMLSchema#double" as const;
 const xsd_float_str = "http://www.w3.org/2001/XMLSchema#float" as const;
+const xsd_boolean_str = "http://www.w3.org/2001/XMLSchema#boolean" as const;
 
 const owl_union_str = "http://www.w3.org/2002/07/owl#unionOf";
 // Checks if a particular parameter in an RDF graph has a position that matches either subject or object.
@@ -356,6 +358,8 @@ function translate_type(rdf_graph:any, parameter: any, type: string, expand = tr
 		case xsd_float_str:
 			ret_n3 = {kind: "float", num:null};
 			break;
+		case xsd_boolean_str:
+			ret_n3 = {kind: "boolean", val:null};
 	}
 	return ret_n3;
 }
