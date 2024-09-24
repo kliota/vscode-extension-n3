@@ -730,8 +730,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (value.match(/^\(\s*\{.*\}\s*\)$/s)) return "listOfFormulas"; // Recognize lists of formulas
 				if (value.match(/^\{.*\}$/s)) return "formula"; // Recognize individual formulas
 				if (value.match(/^\(.*\)$/s)) return "list"; // Recognize lists, including nested lists
-				if (value.match(/^-?\d+(\.\d+)?$/) && parseFloat(value)%1 !== 0) return "float"; // Recognize floats
-				if (value.match(/^-?\d+(\.\d+)?$/) && parseFloat(value)%1 === 0) return "integer"; // Recognize integers
+				if (value.match(/^-?\d+$/) && parseFloat(value)%1 === 0) return "integer"; // Recognize integers
+				if (value.match(/^-?\d+(\.\d+)?$/)) return "float"; // Recognize floats
 				if (value.match(/^".*"$/)) return "string"; // Recognize strings
 				if (value.startsWith(":")) return "function"; // Recognize functions
 				if (value.startsWith("?")) return "variable"; // Recognize variables
@@ -949,6 +949,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 								const typeMapping: Record<string, string> = {
 									"rdf:List": "list",  // Treat rdf:List as a list
 									"xsd:float": "float",
+									"xsd:integer": "integer",
 									"[   rdf:type rdfs:Datatype": "datatype",
 									"xsd:decimal": "decimal",
 									"xsd:string": "string",
@@ -1027,11 +1028,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												typeMapping[fnoType] === subjectType || 
 												(fnoType === "xsd:string" && subjectType === "string") ||  // Ensure xsd:string matches string
 												(fnoType === "rdf:List" && subjectType === "listOfFormulas") || 
-												(fnoType === "log:Formula" && subjectType === "list")
+												(fnoType === "log:Formula" && subjectType === "list") ||
+												(fnoType === "xsd:float" && subjectType === "integer")
 											) {
 												connection.console.log(`The subject data type "${subjectType}" and fno:type "${fnoType}" match.`);
 												subjectTypeMatched = true;
-												if(subjectType === "float" || subjectType === "decimal" || subjectType === "double"){
+												if(subjectType === "float" || subjectType === "decimal" || subjectType === "double" || subjectType === "integer"){
 													isnumeric = true;
 												}
 												break;
@@ -1172,6 +1174,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 																  (expectedTypes.includes("xsd:string") && item === "string") ||
 																  (expectedTypes.includes("xsd:float") && item === "float") ||
 																  (expectedTypes.includes("xsd:decimal") && item === "decimal") ||
+																  (expectedTypes.includes("xsd:float") && item === "integer") ||
 																  expectedTypes.includes("undefined");
 		
 										// Combine the XSD type check with single type validation logic
@@ -1200,10 +1203,24 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									
 									// Check for invalid items 
 									if (invalidItems.length > 0) {
-										connection.console.warn(
-											`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${subjectText.split(/[()]/)[1].split(" ")[index]} (expected: ${item.expectedType})`).join(", ")}.`
-										);
+										const invalidItemMessages = invalidItems.map(item => {
+											return `Type: ${item.type}, Value: ${item.value} (expected: ${item.expectedType})`;
+										  });
+										  
+										  // Print a warning specifically for the invalid items
+										  connection.console.warn(`Invalid items detected: ${invalidItemMessages.join(", ")}.`);
+					  
+
+
+
+
+										//connection.console.warn(
+											//`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
+											//`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${subjectText.split(/[()]/)[1].split(" ")[index]} (expected: ${item.expectedType})`).join(", ")}.`);
+											//`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${subjectText[index]}.` );
+										
+
+
 									}									
 
 									// Additional checks for element counts (if needed)
@@ -1261,11 +1278,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 												typeMapping[fnoType] === objectType || 
 												(fnoType === "xsd:string" && objectType === "string") ||
 												(fnoType === "rdf:List" && objectType === "listOfFormulas") || 
-												(fnoType === "log:Formula" && objectType === "list")
+												(fnoType === "log:Formula" && objectType === "list") ||
+												(fnoType === "xsd:float" && objectType === "integer")
 											) {
 												connection.console.log(`The object data type "${objectType}" and fno:type "${fnoType}" match.`);
 												objectTypeMatched = true;
-												if(objectType === "float" || objectType === "decimal" || objectType === "double"){
+												if(objectType === "float" || objectType === "decimal" || objectType === "double" || objectType === "integer"){
 													isnumeric = true;
 												}
 												break;
