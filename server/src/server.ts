@@ -1209,17 +1209,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 										  
 										  // Print a warning specifically for the invalid items
 										  connection.console.warn(`Invalid items detected: ${invalidItemMessages.join(", ")}.`);
-					  
-
-
-
-
-										//connection.console.warn(
-											//`The list item datatypes of subject "${subjectText}" (list item types: ${listItems.join(", ")}) ` +
-											//`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${subjectText.split(/[()]/)[1].split(" ")[index]} (expected: ${item.expectedType})`).join(", ")}.`);
-											//`do not match the expected types. Invalid items: ${invalidItems.map((item, index) => `${subjectText[index]}.` );
 										
-
 
 									}									
 
