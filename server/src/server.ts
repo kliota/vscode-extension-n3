@@ -822,10 +822,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				if (typeValues.length == 0) {
 					return false;
 				}
-			
 				// Check if the typeValues array contains something that starts with 'rdf:List'
 				const rdfListType = typeValues.find(type => type.startsWith('rdf:List'));
 				const LogFormulaType = typeValues.find(type => type.startsWith('log:Formula'));
+				const XSDType = typeValues.find(type => type.startsWith('xsd:'));
+
+				let xsdElementTypes: string[] = [];
 			
 				if (rdfListType) {
 					// If we found 'rdf:List', only save 'rdf:List'
@@ -833,19 +835,33 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 				}
 				else if (LogFormulaType){
 					variableTypes[text] = "log:Formula";
-				}
-
+				} else if (XSDType && XSDType.length > 0) {						
+						const uniqueXSDTypes = new Set(
+							typeValues
+								.filter(type => type.startsWith('xsd:'))  // Filter to keep only xsd types
+								.map(type => type.trim())  // Trim the type string after filtering
+						);
+    					// Join the unique xsd types into a single string
+						variableTypes[text] = Array.from(uniqueXSDTypes).join(' ');
+				} 
 				else {
-					// If no 'rdf:List' is found, save only the values starting with 'xsd'
-					variableTypes[text] = typeValues
-						.filter(type => type.startsWith('xsd:'))  // Filter to keep only xsd types
-						.join(' ');  // Join the xsd types into a single string
-				}
-			
+					const regex = /owl:unionOf\s*\((.*?)\)\s*\]/g;
+					let typeMatch;
+					while ((typeMatch = regex.exec(typeValues[0])) !== null) {
+						const unionTypes = typeMatch[1].split(/\s+/).filter(type => type);
+						xsdElementTypes.push(unionTypes.join(", "));
+					}
+					if(variablesMap.get(text)=== undefined) {
+					variablesMap.set(text, xsdElementTypes[0]);
+					//variableTypes[text] = xsdElementTypes[0];
+					}
+					variableTypes[text] = xsdElementTypes[0];
+				}				
 				// If the variable was not declared before, add it and its type into variablesMap
 				if (variablesMap.get(text) === undefined) {
 					variablesMap.set(text, variableTypes[text]);
 				}			
+
 				return true;
 			}
 						
