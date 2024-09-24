@@ -548,8 +548,8 @@ async function fetchAndExtractParameters(url: string): Promise<{ xsdValues: stri
     //console.log("Final Data Output:");
     //console.log("xsdValues:", Array.from(xsdValues));
     //console.log("fnoTypes:", Array.from(fnoTypes));
-    console.log("subjectTypes:", Array.from(subjectTypes));
-    console.log("objectTypes:", Array.from(objectTypes));
+    //console.log("subjectTypes:", Array.from(subjectTypes));
+    //console.log("objectTypes:", Array.from(objectTypes));
     //console.log("listElementInfo:", listElementInfo);
 
     return {
@@ -816,22 +816,37 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 			 * @param xsdValues The types of the arguments.
 			 * @returns True if the variable text got assigned a value
 			 */
-			function get_variable_types(text: string, variableTypes:Record<string, string>, xsdValues:string[]): boolean {
-				if(xsdValues.length == 0)
+
+			function get_variable_types(text: string, variableTypes: Record<string, string>, typeValues: string[]): boolean {
+				if (typeValues.length == 0) {
 					return false;
-				variableTypes[text]="";
-				xsdValues.forEach((type:string) => {
-					variableTypes[text] += `${type} `;
-				});
-				variableTypes[text] = variableTypes[text].slice(0, -1);
-				
+				}
+			
+				// Check if the typeValues array contains something that starts with 'rdf:List'
+				const rdfListType = typeValues.find(type => type.startsWith('rdf:List'));
+				const LogFormulaType = typeValues.find(type => type.startsWith('log:Formula'));
+			
+				if (rdfListType) {
+					// If we found 'rdf:List', only save 'rdf:List'
+					variableTypes[text] = "rdf:List";
+				}
+				else if (LogFormulaType){
+					variableTypes[text] = "log:Formula";
+				}
+				else {
+					// If no 'rdf:List' is found, save only the values starting with 'xsd'
+					variableTypes[text] = typeValues
+						.filter(type => type.startsWith('xsd:'))  // Filter to keep only xsd types
+						.join(' ');  // Join the xsd types into a single string
+				}
+			
 				// If the variable was not declared before, add it and its type into variablesMap
 				if (variablesMap.get(text) === undefined) {
 					variablesMap.set(text, variableTypes[text]);
-				}
+				}			
 				return true;
 			}
-			
+						
 			// Ensure that ctx and its children are defined
 			if (!ctx || !ctx.children || ctx.children.length < 2) {
 				connection.console.warn("Invalid context or missing elements in triple.");
@@ -943,7 +958,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									"xsd:dateTime": "xsd:dateTime"
 								};
 		
-								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, xsdValues)) {
+								if (subjectType === "variable" && get_variable_types(subjectText, variableTypes, subjectTypes)) {
 									let varCurrentType = variablesMap.get(subjectText);
 									let varExpectedType = variableTypes[subjectText];
 									if (varCurrentType !== undefined && varCurrentType !== varExpectedType) {
@@ -955,7 +970,7 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 									}
 								}
 								
-								if (objectType === "variable" && get_variable_types(objectText, variableTypes, xsdValues)) {
+								if (objectType === "variable" && get_variable_types(objectText, variableTypes, objectTypes)) {
 									let varCurrentType = variablesMap.get(objectText);
 									let varExpectedType = variableTypes[objectText];
 									// if the variable was declared before AND if the declared type is not the same as expected type
@@ -989,7 +1004,13 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											if (subjectType === "list") {
 												connection.console.log(`The subject type "list" matches with fno:type "${fnoType}".`);
 												subjectTypeMatched = true;
-											} else { // If the expected type is list BUT the existing type is not a list
+											} 
+											else if (subjectType === "listOfFormulas"){
+												connection.console.log(`The subject type "listOfFormulas" matches with fno:type "${fnoType}".`);
+												subjectTypeMatched = true;
+											}
+											
+											else { // If the expected type is list BUT the existing type is not a list
 												connection.console.warn(`The subject type is "${subjectType}", but expected "list".`);
 											}
 											break;
@@ -1211,7 +1232,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 											if (objectType === "list") {
 												connection.console.log(`The object type "list" matches with fno:type "${fnoType}".`);
 												objectTypeMatched = true;
-											} else { // If the expected type is list BUT the existing type is not a list
+											} 
+											else if (objectType === "listOfFormulas"){
+												connection.console.log(`The object type "listOfFormulas" matches with fno:type "${fnoType}".`);
+												objectTypeMatched = true;
+											}											
+											else { // If the expected type is list BUT the existing type is not a list
 												connection.console.warn(`The object type is "${objectType}", but expected "list".`);
 											}
 											break;
